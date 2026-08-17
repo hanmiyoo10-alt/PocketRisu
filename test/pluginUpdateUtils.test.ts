@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { comparePluginVersions, getPluginUpdateFetchInit } from '../src/ts/plugins/pluginUpdateUtils'
+import { buildPluginUpdateURL, comparePluginVersions, getPluginUpdateFetchAttempts } from '../src/ts/plugins/pluginUpdateUtils'
 
 describe('comparePluginVersions', () => {
     it('orders numeric alpha patch increments', () => {
@@ -27,18 +27,31 @@ describe('comparePluginVersions', () => {
     })
 })
 
-describe('getPluginUpdateFetchInit', () => {
-    it('bypasses the browser cache for metadata checks', () => {
-        const init = getPluginUpdateFetchInit(true)
-        expect(init.cache).toBe('no-store')
-        expect(init.method).toBe('GET')
-        expect(init.headers).toEqual({ Range: 'bytes=0-512' })
+describe('buildPluginUpdateURL', () => {
+    it('adds a deterministic cache buster without dropping an existing query', () => {
+        const url = buildPluginUpdateURL('https://example.com/plugin.js?channel=stable', 12345)
+        expect(url).toBe('https://example.com/plugin.js?channel=stable&_risu_update=12345')
+    })
+})
+
+describe('getPluginUpdateFetchAttempts', () => {
+    it('tries range + no-store first, then progressively safer metadata fallbacks', () => {
+        const attempts = getPluginUpdateFetchAttempts(true)
+        expect(attempts).toHaveLength(3)
+        expect(attempts[0]).toEqual({
+            method: 'GET',
+            cache: 'no-store',
+            headers: { Range: 'bytes=0-512' },
+        })
+        expect(attempts[1]).toEqual({ method: 'GET', cache: 'no-store' })
+        expect(attempts[2]).toEqual({ method: 'GET' })
     })
 
-    it('bypasses the browser cache for full plugin downloads', () => {
-        const init = getPluginUpdateFetchInit(false)
-        expect(init.cache).toBe('no-store')
-        expect(init.method).toBe('GET')
-        expect(init.headers).toBeUndefined()
+    it('falls back from no-store to a plain full GET for plugin downloads', () => {
+        const attempts = getPluginUpdateFetchAttempts(false)
+        expect(attempts).toEqual([
+            { method: 'GET', cache: 'no-store' },
+            { method: 'GET' },
+        ])
     })
 })
