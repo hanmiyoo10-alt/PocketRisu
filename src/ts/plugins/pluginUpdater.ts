@@ -1,5 +1,5 @@
 import { importPlugin, type RisuPlugin } from './plugins.svelte'
-import { comparePluginVersions, getPluginUpdateFetchInit } from './pluginUpdateUtils'
+import { buildPluginUpdateURL, comparePluginVersions, getPluginUpdateFetchAttempts } from './pluginUpdateUtils'
 
 type PluginUpdateInfo = {
     version: string
@@ -7,6 +7,30 @@ type PluginUpdateInfo = {
 }
 
 const updateCache = new Map<string, PluginUpdateInfo>()
+
+const fetchPluginUpdateResource = async (updateURL: string, metadataOnly: boolean): Promise<Response> => {
+    const requestURL = buildPluginUpdateURL(updateURL)
+    let lastResponse: Response | undefined
+    let lastError: unknown
+
+    for (const init of getPluginUpdateFetchAttempts(metadataOnly)) {
+        try {
+            const response = await fetch(requestURL, init)
+            if (response.status >= 200 && response.status < 300) {
+                return response
+            }
+            lastResponse = response
+        } catch (error) {
+            lastError = error
+        }
+    }
+
+    if (lastResponse) {
+        return lastResponse
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Plugin update request failed')
+}
 
 export const checkPluginUpdate = async (plugin: RisuPlugin): Promise<PluginUpdateInfo | undefined> => {
     try {
@@ -19,7 +43,7 @@ export const checkPluginUpdate = async (plugin: RisuPlugin): Promise<PluginUpdat
             return cached
         }
 
-        const response = await fetch(plugin.updateURL, getPluginUpdateFetchInit(true))
+        const response = await fetchPluginUpdateResource(plugin.updateURL, true)
         if (response.status < 200 || response.status >= 300) {
             return
         }
@@ -53,7 +77,7 @@ export const updatePlugin = async (plugin: RisuPlugin): Promise<boolean> => {
             return false
         }
 
-        const response = await fetch(plugin.updateURL, getPluginUpdateFetchInit(false))
+        const response = await fetchPluginUpdateResource(plugin.updateURL, false)
         if (response.status < 200 || response.status >= 300) {
             return false
         }

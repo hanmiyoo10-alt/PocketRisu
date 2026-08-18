@@ -96,17 +96,34 @@ export const comparePluginVersions = (v1: string, v2: string): VersionCompareRes
     return comparePrerelease(parsed1.prerelease, parsed2.prerelease)
 }
 
-export const getPluginUpdateFetchInit = (metadataOnly: boolean): RequestInit => {
-    const init: RequestInit = {
+export const buildPluginUpdateURL = (updateURL: string, nonce = Date.now()): string => {
+    const url = new URL(updateURL)
+    url.searchParams.set('_risu_update', String(nonce))
+    return url.toString()
+}
+
+export const getPluginUpdateFetchAttempts = (metadataOnly: boolean): RequestInit[] => {
+    const strict: RequestInit = {
         method: 'GET',
         cache: 'no-store',
     }
 
     if (metadataOnly) {
-        init.headers = {
+        strict.headers = {
             'Range': 'bytes=0-512',
         }
     }
 
-    return init
+    const noStoreWithoutRange: RequestInit = {
+        method: 'GET',
+        cache: 'no-store',
+    }
+
+    const plainGet: RequestInit = {
+        method: 'GET',
+    }
+
+    return metadataOnly
+        ? [strict, noStoreWithoutRange, plainGet]
+        : [noStoreWithoutRange, plainGet]
 }
