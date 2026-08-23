@@ -1,3 +1,12 @@
+<!--
+Local fork feature PRs:
+- Use one feature per branch/PR.
+- Branch: feat/<feature-id> or feat/<feature-id>-<short-description>
+- Keep exactly one Feature-ID line below.
+- For non-feature maintenance/upstream-sync PRs, the feature guard is skipped.
+-->
+Feature-ID: <feature-id>
+
 ## PR Checklist
 
 - Required Checks
