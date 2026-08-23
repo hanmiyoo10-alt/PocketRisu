@@ -3856,10 +3856,12 @@ app.post('/api/patch', async (req, res, next) => {
                 }
             }, SAVE_INTERVAL);
 
-            // Update ETag after successful patch (based on stripped version)
+            // The ETag is only used as an opaque revision token for conflict
+            // detection. Avoid re-encoding and hashing the entire stripped DB
+            // after every successful patch just to mint the next revision.
             patchStage = 'etag';
             if (decodedKey === 'database/database.bin') {
-                dbEtag = computeBufferEtag(Buffer.from(encodeRisuSaveLegacy(dbCache[filePath])));
+                dbEtag = `rev-${nodeCrypto.randomUUID()}`;
             }
 
             const responsePayload = {
