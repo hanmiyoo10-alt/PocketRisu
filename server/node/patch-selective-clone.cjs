@@ -1,5 +1,7 @@
 'use strict';
 
+const { collectPluginStorageSubchildTouches } = require('./patch-hash-cache.cjs');
+
 function decodePointerSegment(segment) {
     return segment.replace(/~1/g, '/').replace(/~0/g, '~');
 }
@@ -40,38 +42,65 @@ function collectPluginStorageChildKeys(patch) {
         for (const field of ['path', 'from']) {
             const pointer = op?.[field];
             if (typeof pointer !== 'string' || !pointer.startsWith('/') || pointer === '') continue;
-            const firstSlash = pointer.indexOf('/', 1);
-            const rawTop = firstSlash === -1 ? pointer.slice(1) : pointer.slice(1, firstSlash);
-            if (decodePointerSegment(rawTop) !== 'pluginCustomStorage') continue;
+
+            const segments = pointer.slice(1).split('/').map(decodePointerSegment);
+            if (segments[0] !== 'pluginCustomStorage') continue;
+
             referencesStorage = true;
-            if (firstSlash === -1) {
+            if (segments.length === 1) {
                 touchesStorageRoot = true;
                 continue;
             }
-            const childEnd = pointer.indexOf('/', firstSlash + 1);
-            const rawChild = childEnd === -1
-                ? pointer.slice(firstSlash + 1)
-                : pointer.slice(firstSlash + 1, childEnd);
-            keys.add(decodePointerSegment(rawChild));
+            keys.add(segments[1]);
         }
     }
+
     return { keys, touchesStorageRoot, referencesStorage };
 }
 
-function isPlainPatchRoot(database) {
-    return database !== null && typeof database === 'object' && !Array.isArray(database);
+function isPlainPatchRoot(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneDirectChildForDeepPatch(child, touch) {
+    if (!isPlainPatchRoot(child) || !touch || touch.touchesChildRoot || touch.subchildren.size === 0) {
+        return structuredClone(child);
+    }
+
+    const snapshot = { ...child };
+    for (const subchildKey of touch.subchildren) {
+        if (Object.prototype.hasOwnProperty.call(child, subchildKey)) {
+            Object.defineProperty(snapshot, subchildKey, {
+                value: structuredClone(child[subchildKey]),
+                enumerable: true,
+                configurable: true,
+                writable: true,
+            });
+        }
+    }
+    return snapshot;
 }
 
 function clonePluginStorageForPatch(storage, patch) {
-    if (!isPlainPatchRoot(storage)) return structuredClone(storage);
+    if (!isPlainPatchRoot(storage)) {
+        return structuredClone(storage);
+    }
+
     const { keys, touchesStorageRoot, referencesStorage } = collectPluginStorageChildKeys(patch);
-    if (touchesStorageRoot || !referencesStorage) return structuredClone(storage);
+    if (touchesStorageRoot || !referencesStorage) {
+        return structuredClone(storage);
+    }
+
+    const deepTouches = collectPluginStorageSubchildTouches(patch);
     const snapshot = { ...storage };
     for (const key of keys) {
         if (Object.prototype.hasOwnProperty.call(storage, key)) {
+            const value = cloneDirectChildForDeepPatch(storage[key], deepTouches.children.get(key));
             Object.defineProperty(snapshot, key, {
-                value: structuredClone(storage[key]),
-                enumerable: true, configurable: true, writable: true,
+                value,
+                enumerable: true,
+                configurable: true,
+                writable: true,
             });
         }
     }
@@ -88,9 +117,6 @@ function clonePatchSnapshot(database, patch) {
         return structuredClone(database);
     }
 
-    // The root itself must be independent so top-level add/remove/replace ops
-    // cannot mutate the live cache. Untouched nested branches stay shared;
-    // every top-level branch that a patch can mutate is cloned below.
     const snapshot = { ...database };
     for (const key of keys) {
         if (Object.prototype.hasOwnProperty.call(database, key)) {
@@ -111,6 +137,7 @@ function clonePatchSnapshot(database, patch) {
 module.exports = {
     clonePatchSnapshot,
     clonePluginStorageForPatch,
+    cloneDirectChildForDeepPatch,
     collectPatchTopLevelKeys,
     collectPluginStorageChildKeys,
 };

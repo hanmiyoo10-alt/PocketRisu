@@ -44,25 +44,55 @@ function collectPluginStorageChildKeys(patch) {
             const pointer = op?.[field];
             if (typeof pointer !== 'string' || !pointer.startsWith('/') || pointer === '') continue;
 
-            const firstSlash = pointer.indexOf('/', 1);
-            const rawTop = firstSlash === -1 ? pointer.slice(1) : pointer.slice(1, firstSlash);
-            if (decodePointerSegment(rawTop) !== 'pluginCustomStorage') continue;
+            const segments = pointer.slice(1).split('/').map(decodePointerSegment);
+            if (segments[0] !== 'pluginCustomStorage') continue;
 
             referencesStorage = true;
-            if (firstSlash === -1) {
+            if (segments.length === 1) {
                 touchesStorageRoot = true;
                 continue;
             }
-
-            const childEnd = pointer.indexOf('/', firstSlash + 1);
-            const rawChild = childEnd === -1
-                ? pointer.slice(firstSlash + 1)
-                : pointer.slice(firstSlash + 1, childEnd);
-            keys.add(decodePointerSegment(rawChild));
+            keys.add(segments[1]);
         }
     }
 
     return { keys, touchesStorageRoot, referencesStorage };
+}
+
+function collectPluginStorageSubchildTouches(patch) {
+    const children = new Map();
+    let touchesStorageRoot = false;
+    let referencesStorage = false;
+
+    for (const op of Array.isArray(patch) ? patch : []) {
+        for (const field of ['path', 'from']) {
+            const pointer = op?.[field];
+            if (typeof pointer !== 'string' || !pointer.startsWith('/') || pointer === '') continue;
+
+            const segments = pointer.slice(1).split('/').map(decodePointerSegment);
+            if (segments[0] !== 'pluginCustomStorage') continue;
+
+            referencesStorage = true;
+            if (segments.length === 1) {
+                touchesStorageRoot = true;
+                continue;
+            }
+
+            const childKey = segments[1];
+            let entry = children.get(childKey);
+            if (!entry) {
+                entry = { subchildren: new Set(), touchesChildRoot: false };
+                children.set(childKey, entry);
+            }
+            if (segments.length === 2) {
+                entry.touchesChildRoot = true;
+            } else {
+                entry.subchildren.add(segments[2]);
+            }
+        }
+    }
+
+    return { children, touchesStorageRoot, referencesStorage };
 }
 
 function createPatchHashCache(calculateHash) {
@@ -76,16 +106,45 @@ function createPatchHashCache(calculateHash) {
         return value !== null && typeof value === 'object' && !Array.isArray(value);
     }
 
+    function buildDirectChildObjectState(child) {
+        if (!isObjectRoot(child)) return null;
+        const subchildHashes = new Map();
+        for (const key in child) {
+            subchildHashes.set(key, calculateHash(child[key]));
+        }
+        return { subchildHashes };
+    }
+
+    function composeDirectChildObjectHash(child, state) {
+        if (!isObjectRoot(child) || !state?.subchildHashes) {
+            return calculateHash(child);
+        }
+        let objectHash = SEED_OBJECT;
+        for (const key in child) {
+            let subchildHash = state.subchildHashes.get(key);
+            if (subchildHash === undefined && !state.subchildHashes.has(key)) {
+                subchildHash = calculateHash(child[key]);
+                state.subchildHashes.set(key, subchildHash);
+            }
+            objectHash += Math.imul(calculateHash(key), PRIME_MULTIPLIER) + subchildHash;
+        }
+        return objectHash >>> 0;
+    }
+
     function buildPluginStorageState(storage) {
         if (!isObjectRoot(storage)) {
-            return { childHashes: null, fullHash: calculateHash(storage) };
+            return {
+                childHashes: null,
+                fullHash: calculateHash(storage),
+                childObjectStates: null,
+            };
         }
 
         const childHashes = new Map();
         for (const key in storage) {
             childHashes.set(key, calculateHash(storage[key]));
         }
-        return { childHashes, fullHash: null };
+        return { childHashes, fullHash: null, childObjectStates: new Map() };
     }
 
     function composePluginStorageHash(storage, state) {
@@ -119,14 +178,57 @@ function createPatchHashCache(calculateHash) {
         }
 
         const childHashes = new Map(previousState.childHashes);
+        const childObjectStates = new Map(previousState.childObjectStates ?? []);
+        const deepTouches = collectPluginStorageSubchildTouches(patch);
+
         for (const key of keys) {
-            if (Object.prototype.hasOwnProperty.call(nextStorage, key)) {
-                childHashes.set(key, calculateHash(nextStorage[key]));
-            } else {
+            if (!Object.prototype.hasOwnProperty.call(nextStorage, key)) {
                 childHashes.delete(key);
+                childObjectStates.delete(key);
+                continue;
             }
+
+            const previousChild = previousStorage[key];
+            const nextChild = nextStorage[key];
+            const touch = deepTouches.children.get(key);
+            const canUseSubchildState = !!(
+                touch
+                && !touch.touchesChildRoot
+                && touch.subchildren.size > 0
+                && isObjectRoot(previousChild)
+                && isObjectRoot(nextChild)
+            );
+
+            if (canUseSubchildState) {
+                let previousChildState = previousState.childObjectStates?.get(key) ?? null;
+                if (!previousChildState) {
+                    previousChildState = buildDirectChildObjectState(previousChild);
+                    if (previousChildState && previousState.childObjectStates) {
+                        previousState.childObjectStates.set(key, previousChildState);
+                    }
+                }
+
+                if (previousChildState) {
+                    const subchildHashes = new Map(previousChildState.subchildHashes);
+                    for (const subchildKey of touch.subchildren) {
+                        if (Object.prototype.hasOwnProperty.call(nextChild, subchildKey)) {
+                            subchildHashes.set(subchildKey, calculateHash(nextChild[subchildKey]));
+                        } else {
+                            subchildHashes.delete(subchildKey);
+                        }
+                    }
+                    const nextChildState = { subchildHashes };
+                    childObjectStates.set(key, nextChildState);
+                    childHashes.set(key, composeDirectChildObjectHash(nextChild, nextChildState));
+                    continue;
+                }
+            }
+
+            childObjectStates.delete(key);
+            childHashes.set(key, calculateHash(nextChild));
         }
-        return { childHashes, fullHash: null };
+
+        return { childHashes, fullHash: null, childObjectStates };
     }
 
     function buildState(database) {
@@ -239,4 +341,5 @@ module.exports = {
     createPatchHashCache,
     collectTouchedTopLevelKeys,
     collectPluginStorageChildKeys,
+    collectPluginStorageSubchildTouches,
 };
