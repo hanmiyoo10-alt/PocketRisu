@@ -1,0 +1,42 @@
+name: PocketRisu feature PR guard
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  feature-boundary:
+    if: startsWith(github.head_ref, 'feat/') || startsWith(github.head_ref, 'feature/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce one Feature-ID per feature PR
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.head_ref }}
+        shell: python
+        run: |
+          import os, re, sys
+
+          body = os.environ.get('PR_BODY', '')
+          head = os.environ.get('HEAD_REF', '')
+
+          matches = re.findall(r'(?mi)^Feature-ID:\s*([a-z0-9][a-z0-9-]*)\s*$', body)
+          if len(matches) != 1:
+              print(f'::error::Feature PR must contain exactly one `Feature-ID: <feature-id>` line; found {len(matches)}.')
+              sys.exit(1)
+
+          feature_id = matches[0]
+          expected = (f'feat/{feature_id}', f'feature/{feature_id}')
+          allowed_prefixes = (
+              f'feat/{feature_id}-', f'feature/{feature_id}-',
+          )
+          if head not in expected and not head.startswith(allowed_prefixes):
+              print(f'::error::Branch `{head}` does not match Feature-ID `{feature_id}`.')
+              print(f'Expected `feat/{feature_id}` or `feat/{feature_id}-...` (also `feature/...`).')
+              sys.exit(1)
+
+          print(f'Feature boundary OK: {feature_id}')
