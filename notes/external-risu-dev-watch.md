@@ -13,6 +13,9 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 - Source: `kwaroran/Risuai`
   - Branch: `main`
   - Last reviewed HEAD: `7101c3c9e71f56e603a25e239554333fc9100695`
+- Source: `kwaroran/Risuai-Next`
+  - Branch: `main`
+  - Last reviewed HEAD: `8dae43c533e5d4a1211298d1f8a6400266c94f74`
 - Source: `PocketRisu/PocketRisu`
   - Branch: `develop`
   - Last reviewed HEAD: `b95d0fa72ce41c61e4ea8d42303499c72a6ba315`
@@ -30,7 +33,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 5. bounded-context and narrative-memory techniques
 6. Node/self-host performance and save integrity
 7. backup/restore and crash-recovery safety
-8. reusable upstream/base-Risu fixes that PocketRisu may have missed
+8. reusable upstream/base-Risu and Risuai-Next architecture ideas that PocketRisu may have missed
 9. PocketRisu's own architectural fixes, regressions, and adopted invariants worth preserving as design knowledge
 
 ## Guardrails
@@ -45,4 +48,4 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 
 ## Automation rule
 
-When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
+When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
