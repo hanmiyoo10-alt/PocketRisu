@@ -25,9 +25,6 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 - Source: `TripleHwang/RisuVault`
   - Branch: `main`
   - Last reviewed HEAD: `f81043922db3af8e4cc4ff411a91f85a2169dfc0`
-- Source: `k-risu/k-risu`
-  - Branch: `main`
-  - Last reviewed HEAD: `1ea18e2cc3e63cfb648ab3b0a1ec9392f64d5ec2`
 - Source: `seto-sama/PocketRisu-Kei`
   - Branch: `main`
   - Last reviewed HEAD: `3b55f692c02c04082b087547b0114506a5373681`
@@ -49,6 +46,7 @@ Seeded full-code candidates discovered on 2026-08-26 include:
 
 - RisuAI-family: `kangjoseph90/RisuAI` (`patchsync`), `risuai/RisuAI` (`main`), `shenruotong/risuai` (`main`), `jeong-jimin-github/RisuAI-KAI` (`main`), `dilluti0n/RisuAI` (`electron-port`), `Pyser08/RisuAI` (`main`), `Pyser08/Risuai-custom` (`main`), `yas-zoa/RisuAI` (`master`), `tresbien-rai/RisuAI` (`main`), `devforai-creator/RisuAI-Hardened` (`main`), `ChatPoongKun/RisuMaou` (`main`), `Budy123/RisuaiClone` (`main`), `magicarslan2007-ctrl/Risuai` (`main`), `sunnyark/Risuai` (`main`), `darthzoloft/Risuai` (`main`), `linyue404/Risuai` (`main`), `misov1/Risuai` (`main`), `octo-patch/Risuai` (`main`), `tiwentichat/RisuAI` (`main`).
 - PocketRisu-family: `myoun/PocketRisu` (`codex/main`), `Eclipses-Saros/PocketRisu`, `boounge2e-ai/PocketRisu`, `3ae3ae/PocketRisu`, `aCafela-coffee/PocketRisu`, `SameDesu123/PocketRisu`, `canister2668/PocketRisu`, `EvoLinkAI/PocketRisu`, `noelkim12/PocketRisu`, `Fau57/PocketRisu`, `repryty/PocketRisu`, `rpaddict/PocketRisu`, `IHaBiS02/PocketRisu`, `shittim-plana/PocketRisu`, `0-Elisha-1/PocketRisu`, `empty1313/PocketRisu`, `hyomibam/PocketRisu`, `Laily6026/PocketRisu`, `georgeatparallel/PocketRisu`, `Pycnocline/PocketRisu`, `Gynephobia/PocketRisu`, `rhplus0831/PocketRisu` (`serve-prd`), `rakey0/PocketRisu`, `hvboq/PocketRisu`, `LemonDouble/PocketRisu`, `universebaby1020/PocketRisu`, `pnya2021/PocketRisu` (`pnya/main`), `yas-zoa/PocketRisu`, `minsawook/PocketRisu-in-server`, `TrissElan/ServerRisu`, `lunayeon82/PocketRisu`, `wuhaoyu050721/PocketRisu`.
+- Discovery-only / non-code source: `k-risu/k-risu` (`main`) — reviewed through initial commit `3f735da8a4345628066e7f6f50f963a27fdaa4fa`; repository contains only `README.md`, and all visible commits are README edits. Former active cursor `1ea18e2cc3e63cfb648ab3b0a1ec9392f64d5ec2` is preserved here for history; do not hourly poll unless code divergence appears.
 
 Also search the wider ecosystem periodically for Risu-related storage, backend, sync, monitoring, memory, plugin, import/export, and deployment projects. Ecosystem projects are idea sources, not automatic code-port sources.
 
