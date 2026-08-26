@@ -37,7 +37,36 @@ Difficulty means engineering/validation risk, not lines of code alone.
 
 Prefer decomposing `L`/`XL` ideas into independently useful, testable slices.
 
-## 5. Priority ordering
+## 5. Evidence / confidence
+
+Evidence determines how much trust to place in the priority estimate and whether implementation should start.
+
+- `HIGH` — supported by direct PocketRisu measurements/tests, a reproducible bug, confirmed production failure, or multiple consistent implementation examples with clear causal evidence.
+- `MEDIUM` — supported by credible external commits/reviews/benchmarks or a strong code-level argument, but not yet reproduced or measured directly in PocketRisu.
+- `LOW` — speculative, anecdotal, inferred from commit titles/architecture alone, or missing enough context to establish a concrete PocketRisu benefit.
+
+Evidence is not the same as importance. A potentially critical idea with `LOW` evidence should normally trigger investigation/measurement before implementation.
+
+## 6. Risk / blast radius
+
+Risk describes how damaging a wrong implementation could be, independent of implementation difficulty.
+
+- `LOW` — localized, easy to disable/revert, little persistence/security/data-loss exposure.
+- `MEDIUM` — crosses important state or compatibility boundaries, but has contained rollback and limited persistent impact.
+- `HIGH` — can corrupt/lose data, weaken security, break storage/protocol compatibility, destabilize deployment/device operation, or cause broad hard-to-recover regressions.
+
+High-risk ideas require explicit invariants, failure-path validation, and rollback before they can be treated as execution-ready.
+
+## 7. Dependencies / blockers
+
+Every idea should explicitly record prerequisites.
+
+- `NONE` — no known prerequisite beyond normal implementation/testing.
+- otherwise list concrete blocking design, PR, upstream architecture, migration, measurement, or environment requirement.
+
+A high-priority idea can still be blocked. Never hide a dependency by lowering or raising its importance. Record the priority and blocker separately.
+
+## 8. Priority ordering
 
 The main rule is: **higher importance first, then lower difficulty, then smaller size.**
 
@@ -49,11 +78,20 @@ Canonical matrix:
 - `P3` — `MEDIUM` + `HIGH`, or `LOW` + `MEDIUM`.
 - `P4` — `LOW` + `HIGH`.
 
-Within the same priority class, sort by size `XS` → `S` → `M` → `L` → `XL`. After that, prefer stronger measured evidence, fewer dependencies, and easier rollback.
+Within the same priority class, sort by size `XS` → `S` → `M` → `L` → `XL`. After that, prefer stronger evidence, lower risk, fewer dependencies, and easier rollback.
 
 `SYSTEM_UPDATE_REQUIRED` and `NO_SYSTEM_UPDATE` should normally be shown as separate sections; apply the same P0–P4 ordering inside each section. Do not silently promote a system update merely because it is technically easy.
 
-## 6. Required fields for every idea
+### Execution gate
+
+Priority alone does not authorize implementation.
+
+- `Evidence: LOW` + `Risk: HIGH` → investigate/measure first; remain `DESIGN_NEEDED` or `HOLD`.
+- `Risk: HIGH` → require explicit rollback, invariant tests, and failure-path validation before `READY_TO_PORT`.
+- unresolved blocking dependency → do not start implementation even if priority is `P0`; record `BLOCKED` in follow-up/design notes while keeping the lifecycle status accurate.
+- the strongest quick-win profile is normally `NO_SYSTEM_UPDATE + P0 + Evidence HIGH + Risk LOW + Dependencies NONE`.
+
+## 9. Required fields for every idea
 
 Every backlog item should carry these fields, either as columns or an equivalent structured block:
 
@@ -61,6 +99,9 @@ Every backlog item should carry these fields, either as columns or an equivalent
 - `Importance`: `HIGH` / `MEDIUM` / `LOW`
 - `Difficulty`: `LOW` / `MEDIUM` / `HIGH`
 - `Size`: `XS` / `S` / `M` / `L` / `XL`
+- `Evidence`: `HIGH` / `MEDIUM` / `LOW`
+- `Risk`: `LOW` / `MEDIUM` / `HIGH`
+- `Dependencies`: `NONE` or explicit blockers/prerequisites
 - `Priority`: `P0`–`P4`
 - existing lifecycle status: `READY_TO_PORT`, `DESIGN_NEEDED`, `HOLD`, `ADOPTED`, or `SUPERSEDED`
 - source evidence and commit SHA(s)
@@ -71,22 +112,35 @@ Every backlog item should carry these fields, either as columns or an equivalent
 
 If an estimate is uncertain, mark it explicitly and refine it after inspection rather than inventing certainty.
 
-## 7. Assistant-owned design draft
+## 10. Lifecycle status is separate from priority
+
+Do not conflate urgency with readiness.
+
+- `READY_TO_PORT` — assumptions resolved enough to implement safely with concrete validation.
+- `DESIGN_NEEDED` — promising but important design, ownership, migration, or validation questions remain.
+- `HOLD` — useful reference but currently unjustified, conflicting, blocked by direction, or too speculative.
+- `ADOPTED` — implemented in PocketRisu; keep priority/history for context rather than deleting the record.
+- `SUPERSEDED` — replaced by a newer architecture/idea; preserve the evidence and why it became obsolete.
+
+A `P0` item may still be `DESIGN_NEEDED` because of weak evidence, high risk, or unresolved dependencies. A lower-priority item may be `READY_TO_PORT` but should still wait behind stronger opportunities unless it unlocks them.
+
+## 11. Assistant-owned design draft
 
 For promising ideas, especially `DESIGN_NEEDED`, the assistant should proactively draft the design instead of waiting for the user to specify every implementation detail. A useful design draft should include:
 
-1. **Problem/evidence** — what measured or observed problem is being solved.
+1. **Problem/evidence** — what measured or observed problem is being solved and current confidence level.
 2. **Minimal safe scope** — the smallest useful slice that can land independently.
 3. **Affected ownership boundaries** — browser/client, shared code, server, plugin storage, DB, deployment/device, etc.
 4. **Proposed mechanism** — enough detail to evaluate correctness, without blindly copying source architecture.
 5. **Compatibility/invariants** — existing behavior and PocketRisu guardrails that must remain true.
 6. **Validation plan** — tests, benchmark/heap/RSS/latency metrics, failure cases, and acceptance criteria.
-7. **Rollback/fallback** — how to disable or revert safely if the change misbehaves.
-8. **Dependencies and decomposition** — prerequisite work and smaller PR slices when appropriate.
+7. **Risk/blast radius** — what can break and how damage is contained.
+8. **Rollback/fallback** — how to disable or revert safely if the change misbehaves.
+9. **Dependencies and decomposition** — prerequisite work and smaller PR slices when appropriate.
 
-A design may move an item from `DESIGN_NEEDED` to `READY_TO_PORT` only after its important assumptions are resolved and validation is concrete.
+A design may move an item from `DESIGN_NEEDED` to `READY_TO_PORT` only after its important assumptions are resolved, evidence is sufficient for the risk level, dependencies are explicit/resolved, and validation/rollback are concrete.
 
-## 8. Shared PocketRisu guardrails
+## 12. Shared PocketRisu guardrails
 
 Classification never overrides project safety rules. In particular:
 
@@ -98,6 +152,6 @@ Classification never overrides project safety rules. In particular:
 - server phone must not create Android notifications;
 - external Risu variants are evidence sources, not automatic authority.
 
-## 9. Backfill rule
+## 13. Backfill rule
 
-Existing idea lists should be progressively normalized to this schema. Do not discard historical entries merely because their old classification is incomplete. Add the new dimensions, re-rank them, and preserve source/history/status references.
+Existing idea lists should be progressively normalized to this schema. Do not discard historical entries merely because their old classification is incomplete. Add the new dimensions, re-rank them, and preserve source/history/status references. When normalization changes what should be done next, record that as a meaningful priority change.
