@@ -59,13 +59,14 @@ Purpose: durable idea ledger for PocketRisu candidates and architectural lessons
 | READY_TO_PORT | import safety | Await/serialize parallel imports so module assets cannot be lost by racing finalization | `rpaddict/RisuBard` `f27bb016`, `96a5350f` | safer bulk character/module imports | unnecessary serialization can slow imports | inspect current import concurrency and add race regression test |
 | DESIGN_NEEDED | backup safety | Harden local backup restore with explicit server limits and validated recovery ordering | `rpaddict/RisuBard` `80fe8e15` | safer restore against malformed/oversized inputs | exact limits depend on PocketRisu formats and device capacity | compare existing restore validation/size caps |
 | READY_TO_PORT | plugin security | Keep strong V3 APIs capability/permission-gated and explicitly retire unsafe legacy plugin install paths | base `kwaroran/Risuai` `26072043`, `839d190b` | reduce privilege surprises and legacy attack surface | compatibility impact for old plugins | compare PocketRisu V3 permission surface and legacy install behavior |
-| DESIGN_NEEDED | parser/security | Restore transformed CSS only from call-scoped parsed elements/markers after sanitization, never by raw string reinsertion | base `kwaroran/Risuai` `5cc5bc05` | preserve rich character CSS while avoiding sanitizer-bypass regressions | parser behavior is security-sensitive and may differ in PocketRisu | audit PocketRisu markdown/style pipeline before copying any technique |
+| DESIGN_NEEDED | parser/security | Restore transformed CSS only from call-scoped parsed elements/markers after sanitization, never by raw string reinsertion | base `kwaroran/Risuai` `5cc5bc05`; sanitizer-hook evidence `nevaeh5379/HaejeokRisuai` `796adfc4` | preserve rich character CSS while avoiding sanitizer-bypass regressions | parser behavior is security-sensitive and may differ in PocketRisu | audit PocketRisu markdown/style pipeline; transform only inside sanitizer/parsed-CSS boundaries |
 | HOLD | save architecture lesson | Do not replace snapshots with a reactive DB proxy unless write-side effects, descriptor writes, and self-subscription loops are proven safe | base `kwaroran/Risuai` revert `72ce7218` of incremental proxy layer | preserves a concrete failure lesson for future save optimization work | not a feature to port; a regression warning | require regression tests for effect loops, legacy descriptor writes, and settings mutations before similar refactors |
 | ADOPTED | save integrity | Recompute current ETag when a precondition arrives and bump revision identity after side-channel manifest edits | official `PocketRisu/PocketRisu:develop` `b95d0fa7` | prevents stale full writes from rolling back newer plugin/manifest state after restart/cache invalidation | ETag semantics must stay consistent across all write paths | preserve as an invariant when #66/#74-style storage architecture evolves |
 | ADOPTED | patch safety | Snapshot patch application safely and retain actionable patch-failure diagnostics | official PocketRisu `e2c6d157`; selective-clone work later reviewed in upstream PRs | safer rollback/diagnosis when patches fail | full structuredClone can be expensive on huge DBs | keep correctness invariant while optimizing cloning selectively |
 | ADOPTED | server-phone / large DB | Spill SQLite VACUUM temp to disk and preflight enough free space instead of copying multi-GB DBs in RAM | official PocketRisu `f437a4c8` | avoids OOM during DB maintenance on constrained/self-host devices | disk-space estimation and temp path portability | preserve for any future optimize/compact command |
 | ADOPTED | asset integrity | Orphan cleanup must include plugin-stored/legacy/specialized asset references and fail closed when reference discovery is suspect | official PocketRisu `3b8b6401`, `3c6bdaf5`, `729db6ad` | avoids destructive cleanup of live assets | every new asset-bearing feature can create a new hidden reference domain | add reference-discovery tests alongside new asset features |
-| DESIGN_NEEDED | plugin storage / browser memory | Externalize large plugin storage from the main browser DB object and hydrate per key/on demand | official PocketRisu direction discussed around upstream #73/#74 | attacks browser OOM at the source instead of only speeding server saves | migration, compatibility hydration, GC, snapshot/value lifetime | measure lazy hydration, duplicate fetch/parse, snapshot GC and legacy export hydrate hot paths |
+| DESIGN_NEEDED | plugin storage / browser memory | Externalize large plugin storage from the main browser DB object and hydrate per key/on demand | official PocketRisu direction discussed around upstream #73/#74; lazy-per-key UI evidence `nevaeh5379/HaejeokRisuai` `63ff1523` | attacks browser OOM at the source instead of only speeding server saves | migration, compatibility hydration, GC, snapshot/value lifetime | measure lazy hydration, duplicate fetch/parse, snapshot GC and legacy export hydrate hot paths |
+| DESIGN_NEEDED | plugin storage diagnostics | Inspect plugin custom storage lazily per key with a read-only-first diagnostics UI | `nevaeh5379/HaejeokRisuai` `63ff152385fb5fb8c6b339e977c4a3a0d5ed3f1b` | diagnose large/plugin-specific storage without hydrating every value into browser memory | values may contain secrets; generic rename/delete/clear/write can corrupt plugin state | start with bounded key metadata + selected-value fetch only; require authorization/redaction and rollback before mutation |
 | DESIGN_NEEDED | server retrieval/cache | Persist validated Node vector indexes across restarts with bounded disk LRU and lazy restore | `nevaeh5379/HaejeokRisuai` `d23a24a6`, graceful-write evidence `3a192633` | avoid re-embedding/rebuilding unchanged retrieval indexes after server restarts; lower restart recovery latency/cost | stale/corrupt/private embedding cache, disk growth, revision/signature mismatch, backup/export semantics | prototype as disposable derived cache only; measure restart reuse, shutdown flush, and corruption/invalidation behavior |
 | HOLD | diagnostics/storage | Authenticated read-only browser/Node SQLite explorer with pagination and explicit backend capability checks | `nevaeh5379/HaejeokRisuai` `c19d5bfb` | make storage migrations/corruption/cache debugging observable without raw shell access | can expose sensitive DB contents; write-capable explorer would have too much blast radius | keep read-only/admin-scoped; require redaction/authorization and no mutation path before reconsidering |
 | HOLD | organization UX | Persona-scoped modules and collection-folder managers | `rpaddict/RisuBard` `9e2b5b26`, `0ffe502c`, `d922c28e` | potentially better organization for large libraries | product-level UX scope, not current performance/integrity priority | keep as reference until matching user need exists |
@@ -75,6 +76,63 @@ Purpose: durable idea ledger for PocketRisu candidates and architectural lessons
 This section progressively backfills the common schema without deleting the historical compact rows above. It is authoritative when it names an existing idea.
 
 ### NO_SYSTEM_UPDATE
+
+#### P1 — Sanitizer-scoped CSS transformation invariant
+
+- Lifecycle: `DESIGN_NEEDED`
+- Existing idea: `Restore transformed CSS only from call-scoped parsed elements/markers after sanitization, never by raw string reinsertion`.
+- Source evidence: base `kwaroran/Risuai` `5cc5bc05`; `nevaeh5379/HaejeokRisuai` `796adfc4508d407529115b5504091ef6e163e0c7` transforms inline color attributes inside DOMPurify hooks rather than re-inserting arbitrary raw HTML after sanitization.
+- System impact: `NO_SYSTEM_UPDATE`
+- Importance: `HIGH`
+- Difficulty: `MEDIUM`
+- Size: `S`
+- Evidence: `MEDIUM`
+- Risk: `HIGH`
+- Dependencies: PocketRisu markdown/style sanitizer audit; malicious-CSS regression corpus; explicit property/value allowlist or parsed-CSS boundary for style-block transforms.
+- Priority: `P1`
+- PocketRisu benefit: keep rich character styling or future theme adaptation without reopening sanitizer-bypass classes that can affect every rendered chat.
+- Main conflict/risk: post-sanitize raw-string restoration or regex rewriting of arbitrary CSS can defeat sanitizer assumptions, preserve dangerous URLs, or corrupt valid CSS. High risk keeps this design-only even though the safe placement principle is clear.
+- Validation need: test inline `style`, legacy `color`/`bgcolor`, `<style>` blocks, `url()`, gradients, malformed declarations, nested functions, escaped values, sanitizer allow/deny cases, and exact feature-off output parity.
+- Follow-up: do not port the auto-color feature itself from `796adfc4`; preserve only the sanitizer-ownership lesson until PocketRisu has a concrete styling need.
+
+Design draft:
+- Problem/evidence: PocketRisu supports rich bot-authored markup, so any CSS transform shares a security boundary with sanitization. HaejeokRisuai provides fresh evidence that inline transforms can be placed in `uponSanitizeAttribute`, while older RisuAI history already showed the danger of restoring transformed CSS outside a safe parsed boundary.
+- Minimal safe scope: if a future feature needs CSS rewriting, transform only explicitly allowed color-like values during sanitizer processing; do not add a generic post-sanitize HTML/CSS rewrite pass.
+- Ownership boundaries: parser/sanitizer owns markup safety; theme/UI code supplies only pure color conversion; character/plugin content remains untrusted input.
+- Proposed mechanism: for inline attributes, modify only allowlisted color properties inside the sanitizer hook and leave URL-bearing values untouched; for `<style>` blocks, use a real CSS parser/AST plus property allowlist rather than a whole-stylesheet regex.
+- Compatibility/invariants: DOMPurify remains the final authority; no new tag/attribute privilege; no creation or normalization of `href`, `src`, `url()`, imports, or behavior-bearing CSS; disabling the feature yields the prior sanitized output.
+- Acceptance criteria: malicious corpus cannot regain stripped URLs/properties; transformed output remains valid under re-sanitization; malformed CSS fails closed/unchanged; feature-off parity is exact; parser performance remains bounded on long chat renders.
+- Risk/blast radius: parser-wide and security-sensitive, so failure can affect every chat render; contain via opt-in gate, narrow allowlist, pure helpers, and dedicated fuzz/regression tests.
+- Rollback/fallback: disable the transformation gate and use the existing sanitizer output with no migration or persisted-state change.
+- PR decomposition: (1) sanitizer invariant tests, (2) pure allowlisted color-value helper, (3) inline-hook integration only, (4) separate reviewed AST-based style-block support if ever required.
+
+#### P1 — Lazy per-key plugin storage inspector, read-only first
+
+- Lifecycle: `DESIGN_NEEDED`
+- Source evidence: `nevaeh5379/HaejeokRisuai` `63ff152385fb5fb8c6b339e977c4a3a0d5ed3f1b` lists plugin-storage keys first and loads a value only when selected; its source UI also exposes create/rename/copy/delete/clear operations, which are treated here as risk evidence rather than a port target.
+- System impact: `NO_SYSTEM_UPDATE`
+- Importance: `MEDIUM`
+- Difficulty: `LOW`
+- Size: `S`
+- Evidence: `MEDIUM`
+- Risk: `MEDIUM`
+- Dependencies: stable PocketRisu per-key `pluginCustomStorage` API/externalization boundary; privileged settings access; sensitive-value/redaction policy; bounded preview-size contract.
+- Priority: `P1`
+- PocketRisu benefit: inspect or troubleshoot large plugin storage without hydrating every plugin value into the browser, while giving the current externalization work an observable per-key diagnostic surface.
+- Main conflict/risk: plugin storage may contain secrets or application-critical state; a generic editor can bypass plugin invariants and destructive delete/clear operations need stronger rollback than ordinary settings UI.
+- Validation need: huge single values, thousands of keys, rapid selection races, key deleted between list/read, invalid/non-JSON legacy values, authorization/redaction, browser heap before/after close, and no accidental bulk hydration.
+- Follow-up: prototype only read-only key metadata + selected-value fetch; mutation remains blocked until explicit backup/undo, ownership, and reload semantics are designed.
+
+Design draft:
+- Problem/evidence: plugin storage is moving toward a per-key externalized boundary to reduce browser-memory pressure. HaejeokRisuai shows a practical UI pattern where key enumeration is cheap and selected values are fetched lazily instead of loading the whole store.
+- Minimal safe scope: privileged settings page that lists key/name/optional size metadata and fetches one selected value on demand; no create, rename, copy, save, delete, or clear in the first slice.
+- Ownership boundaries: plugin storage backend remains authoritative; diagnostics UI is an observer only; targeted V3 runtime reload and plugin update persistence are untouched.
+- Proposed mechanism: bounded key enumeration, request-generation token for selected-value reads so stale responses cannot replace a newer selection, configurable preview byte cap, explicit reveal for sensitive values when policy allows, and release of the selected parsed value when the panel closes or selection changes.
+- Compatibility/invariants: no full DB hydration or forced DB flush; no mutation through diagnostics endpoints; legacy/non-JSON values remain viewable as bounded raw metadata without normalization; closing the explorer cannot affect plugin state.
+- Acceptance criteria: opening the page does not fetch every value; N-key stores have bounded initial memory; rapid selections display only the latest response; oversized values are truncated/metadata-only without parsing OOM; unauthorized contexts cannot read values; closing releases retained preview state.
+- Risk/blast radius: read-only scope contains persistence risk, but confidentiality remains meaningful because plugin values can be sensitive.
+- Rollback/fallback: hide/disable the diagnostics route; no storage migration and no data rollback required.
+- PR decomposition: (1) read-only per-key diagnostics API/contract + authorization tests, (2) bounded key list UI, (3) selected-value lazy preview + stale-response tests, (4) only later consider mutation as a separate high-risk feature.
 
 #### P1 — Scoped Hypa query embedding cache + in-flight coalescing
 
@@ -183,9 +241,11 @@ No new system-update candidate was found in the 2026-08-26 forward review. Curre
 
 ## Forward review log
 
+- 2026-08-26: `nevaeh5379/HaejeokRisuai:main` advanced from `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42` to `796adfc4508d407529115b5504091ef6e163e0c7`. Reviewed exactly three new commits: `63ff152385fb5fb8c6b339e977c4a3a0d5ed3f1b` (lazy-per-key plugin storage explorer plus destructive editor operations), `04d61ca14434561e420a86ca98fe2ee21c7b0584` (mobilechat/cardboard restyle and enum-safe dark prose class check), and `796adfc4508d407529115b5504091ef6e163e0c7` (bot inline/style color adaptation wired into sanitizer hooks). Added a P1/DESIGN_NEEDED read-only-first plugin-storage inspector design, strengthened and normalized the parser/sanitizer invariant as P1/DESIGN_NEEDED, and did not promote the auto-color UI itself. The `04d61ca1` `prose-invert` boolean/enumeration fix is already present on current `PocketRisu/PocketRisu:develop`, so it was treated as already-adopted evidence rather than a port candidate. Registry cursor advanced to `796adfc4508d407529115b5504091ef6e163e0c7`.
+- 2026-08-26 discovery: rechecked seeded `ChatPoongKun/RisuMaou:main`; current HEAD `16e91456f2813043cacf1a3ca84c91862439f733` is dated 2026-02-06. It remains discovery-only this pass because there is no fresh maintenance signal justifying hourly promotion; no claim of mirror-equivalence was made.
 - 2026-08-26: `nevaeh5379/HaejeokRisuai:main` advanced from `d23a24a6ec747dcf21f671a095da9dedd60c3356` to `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42`. Reviewed exactly three new commits: `59c4eb7a8881e335d12fc49c627436dd689301bc` (bounded scoped Hypa query cache + vector-cache controls), `3a192633716f42ffa5a557de08ad99189568b668` (in-flight query coalescing, clear-safe epochs, graceful persistent-vector write flush), and `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42` (browser SQLite explorer). Added one blocked P1 design candidate, strengthened the persistent-vector-cache design, and retained the explorer as P2/HOLD diagnostics evidence. Registry cursor advanced to `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42`.
 - 2026-08-26: prior forward pass reviewed `nevaeh5379/HaejeokRisuai:main` from `2ee2ef86065eb0037590317f1950fe389144af02` to `d23a24a6ec747dcf21f671a095da9dedd60c3356`, covering `1d4b0c5c783b3f4ef5738c21a17192c07a6f3cbb` (Node-owned Hypa memory orchestration) and `d23a24a6ec747dcf21f671a095da9dedd60c3356` (persistent server vector indexes).
-- 2026-08-26: `rpaddict/RisuBard`, `kwaroran/Risuai`, `kwaroran/Risuai-Next`, `PocketRisu/PocketRisu:develop`, and `TripleHwang/RisuVault` were rechecked at their registered heads during this pass. No cursor changes were needed for those confirmed sources; remaining low-traffic active sources retain their previous cursors pending the next bounded verification pass.
+- 2026-08-26: all other active sources were rechecked against their registered cursors during this pass; no additional cursor changes were needed.
 - Historical backfill milestone did not advance in this pass; forward traffic took precedence and several active sources still lack proven complete pre-2026-08-26 coverage.
 
 ## Recording rules
