@@ -31,6 +31,15 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 - Source: `seto-sama/PocketRisu-Kei`
   - Branch: `main`
   - Last reviewed HEAD: `3b55f692c02c04082b087547b0114506a5373681`
+- Source: `Nagase-Kotono/PocketRisu-kotono`
+  - Branch: `main`
+  - Last reviewed HEAD: `1fa0294df185910c45606dfd678c490b1793ebcb`
+- Source: `tegy1117/Kei-Risu`
+  - Branch: `main`
+  - Last reviewed HEAD: `8d794f9753381ab2582509a6cfb577968a6de595`
+- Source: `PocketRisu-Alter/PocketRisu-Alter`
+  - Branch: `main`
+  - Last reviewed HEAD: `128482ce9984a30ecb68834d561169846d068295`
 
 ## Historical source
 
@@ -45,7 +54,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 5. bounded-context and narrative-memory techniques
 6. Node/self-host performance and save integrity
 7. backup/restore and crash-recovery safety
-8. reusable upstream/base-Risu, Risuai-Next, RisuVault, K-Risu, and PocketRisu-Kei architecture ideas that PocketRisu may have missed
+8. reusable upstream/base-Risu, Risuai-Next, RisuVault, K-Risu, PocketRisu-Kei, PocketRisu-kotono, Kei-Risu, and PocketRisu-Alter architecture ideas that PocketRisu may have missed
 9. PocketRisu's own architectural fixes, regressions, and adopted invariants worth preserving as design knowledge
 
 ## Guardrails
@@ -60,4 +69,4 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 
 ## Automation rule
 
-When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next, both RisuVault repositories, K-Risu, and PocketRisu-Kei) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
+When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next, both RisuVault repositories, K-Risu, PocketRisu-Kei, PocketRisu-kotono, Kei-Risu, and PocketRisu-Alter) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
