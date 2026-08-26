@@ -19,6 +19,15 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 - Source: `PocketRisu/PocketRisu`
   - Branch: `develop`
   - Last reviewed HEAD: `b95d0fa72ce41c61e4ea8d42303499c72a6ba315`
+- Source: `InoriNatsume/RisuVault`
+  - Branch: `master`
+  - Last reviewed HEAD: `1284cc93853bdba80fc3aab537fad2817d695914`
+- Source: `TripleHwang/RisuVault`
+  - Branch: `main`
+  - Last reviewed HEAD: `08800a2341a75abbc5d98f21a95d9b89bd453821`
+- Source: `k-risu/k-risu`
+  - Branch: `main`
+  - Last reviewed HEAD: `1ea18e2cc3e63cfb648ab3b0a1ec9392f64d5ec2`
 
 ## Historical source
 
@@ -33,7 +42,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 5. bounded-context and narrative-memory techniques
 6. Node/self-host performance and save integrity
 7. backup/restore and crash-recovery safety
-8. reusable upstream/base-Risu and Risuai-Next architecture ideas that PocketRisu may have missed
+8. reusable upstream/base-Risu, Risuai-Next, RisuVault, and K-Risu architecture ideas that PocketRisu may have missed
 9. PocketRisu's own architectural fixes, regressions, and adopted invariants worth preserving as design knowledge
 
 ## Guardrails
@@ -48,4 +57,4 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 
 ## Automation rule
 
-When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
+When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next, both RisuVault repositories, and K-Risu) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
