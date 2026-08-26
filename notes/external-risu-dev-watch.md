@@ -28,6 +28,9 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 - Source: `k-risu/k-risu`
   - Branch: `main`
   - Last reviewed HEAD: `1ea18e2cc3e63cfb648ab3b0a1ec9392f64d5ec2`
+- Source: `seto-sama/PocketRisu-Kei`
+  - Branch: `main`
+  - Last reviewed HEAD: `3b55f692c02c04082b087547b0114506a5373681`
 
 ## Historical source
 
@@ -42,7 +45,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 5. bounded-context and narrative-memory techniques
 6. Node/self-host performance and save integrity
 7. backup/restore and crash-recovery safety
-8. reusable upstream/base-Risu, Risuai-Next, RisuVault, and K-Risu architecture ideas that PocketRisu may have missed
+8. reusable upstream/base-Risu, Risuai-Next, RisuVault, K-Risu, and PocketRisu-Kei architecture ideas that PocketRisu may have missed
 9. PocketRisu's own architectural fixes, regressions, and adopted invariants worth preserving as design knowledge
 
 ## Guardrails
@@ -57,4 +60,4 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 
 ## Automation rule
 
-When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next, both RisuVault repositories, and K-Risu) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
+When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next, both RisuVault repositories, K-Risu, and PocketRisu-Kei) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
