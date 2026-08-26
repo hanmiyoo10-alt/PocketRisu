@@ -46,6 +46,7 @@ Purpose: durable idea ledger for PocketRisu candidates and architectural lessons
 | DESIGN_NEEDED | startup/data | Defer heavy domains (personas, presets, lorebooks, modules, prompts, scripts) and hydrate on demand | historical `nevaeh5379/Risuai` `a91e9578` | smaller startup object graph and lower initial memory/IO | plugin/prompt code may assume synchronous fully hydrated DB | inventory synchronous consumers and identify safe deferred domains |
 | DESIGN_NEEDED | cache/recovery | Explicit database recovery path plus cache reconciliation rather than assuming cache is authoritative | historical `nevaeh5379/Risuai` `15deee7e` | safer recovery after partial/corrupt cache state | recovery can overwrite newer state if revision identity is weak | define authoritative source/revision rules before implementation |
 | DESIGN_NEEDED | server compute | Capability-aware Node chat/memory execution boundary with exact provider/format support and browser fallback | `nevaeh5379/HaejeokRisuai` `73b3cdb6`, `d6891c88`, `db4fb3be`, `16e23121`, `1d4b0c5c` and follow-ups | move selected expensive/network/memory-orchestration work off browser while preserving compatibility | server-side credential exposure; authenticated session isolation; phone CPU/load; broad architecture change | only consider pinned providers and explicit capability negotiation; benchmark phone impact and validate session isolation/cancel paths |
+| DESIGN_NEEDED | server retrieval/cache | Bound and scope repeated Hypa query embeddings; coalesce identical in-flight requests with clear-safe epochs | `nevaeh5379/HaejeokRisuai` `59c4eb7a`, `3a192633` | avoid duplicate embedding calls/latency for repeated or concurrent retrieval queries while bounding RAM | cross-session/provider/credential reuse would be a privacy bug; cache-clear races can resurrect stale entries | only after a Node Hypa boundary exists; test scope/provider fingerprints, eviction, concurrent joins, clear races, and no-cache fallback |
 | DESIGN_NEEDED | chat/perf | Server-side token accounting/generation planning that returns kept indexes rather than prompt payload copies | `nevaeh5379/HaejeokRisuai` `d8d3aaa6`, `493f1267`, `fd39dba7` | reduce browser planning CPU and avoid sending duplicate large prompt bodies | tokenizer parity and server-phone load; protocol complexity | compare browser planning time vs server round-trip on long chats |
 | DESIGN_NEEDED | architecture | Share runtime-neutral frontend/server contracts and pure chat policies instead of duplicating semantics | `nevaeh5379/HaejeokRisuai` `bf92c8fa`, `742cc2bb`, `3abae085` | fewer browser/server drift bugs and easier safe offload | refactor churn without immediate user benefit | adopt opportunistically when touching a duplicated contract |
 | READY_TO_PORT | request safety | Bound retry/fallback state machines, including pathological content retries | `nevaeh5379/HaejeokRisuai` `807f33b1`, `f3fb11d2` | prevent unbounded retry loops and make fallback behavior testable | behavior changes may affect provider-specific retry expectations | audit PocketRisu retry loops and add hard upper-bound tests |
@@ -65,7 +66,8 @@ Purpose: durable idea ledger for PocketRisu candidates and architectural lessons
 | ADOPTED | server-phone / large DB | Spill SQLite VACUUM temp to disk and preflight enough free space instead of copying multi-GB DBs in RAM | official PocketRisu `f437a4c8` | avoids OOM during DB maintenance on constrained/self-host devices | disk-space estimation and temp path portability | preserve for any future optimize/compact command |
 | ADOPTED | asset integrity | Orphan cleanup must include plugin-stored/legacy/specialized asset references and fail closed when reference discovery is suspect | official PocketRisu `3b8b6401`, `3c6bdaf5`, `729db6ad` | avoids destructive cleanup of live assets | every new asset-bearing feature can create a new hidden reference domain | add reference-discovery tests alongside new asset features |
 | DESIGN_NEEDED | plugin storage / browser memory | Externalize large plugin storage from the main browser DB object and hydrate per key/on demand | official PocketRisu direction discussed around upstream #73/#74 | attacks browser OOM at the source instead of only speeding server saves | migration, compatibility hydration, GC, snapshot/value lifetime | measure lazy hydration, duplicate fetch/parse, snapshot GC and legacy export hydrate hot paths |
-| DESIGN_NEEDED | server retrieval/cache | Persist validated Node vector indexes across restarts with bounded disk LRU and lazy restore | `nevaeh5379/HaejeokRisuai` `d23a24a6` | avoid re-embedding/rebuilding unchanged retrieval indexes after server restarts; lower restart recovery latency/cost | stale/corrupt/private embedding cache, disk growth, revision/signature mismatch, backup/export semantics | prototype as disposable derived cache only; measure restart reuse and corruption/invalidation behavior |
+| DESIGN_NEEDED | server retrieval/cache | Persist validated Node vector indexes across restarts with bounded disk LRU and lazy restore | `nevaeh5379/HaejeokRisuai` `d23a24a6`, graceful-write evidence `3a192633` | avoid re-embedding/rebuilding unchanged retrieval indexes after server restarts; lower restart recovery latency/cost | stale/corrupt/private embedding cache, disk growth, revision/signature mismatch, backup/export semantics | prototype as disposable derived cache only; measure restart reuse, shutdown flush, and corruption/invalidation behavior |
+| HOLD | diagnostics/storage | Authenticated read-only browser/Node SQLite explorer with pagination and explicit backend capability checks | `nevaeh5379/HaejeokRisuai` `c19d5bfb` | make storage migrations/corruption/cache debugging observable without raw shell access | can expose sensitive DB contents; write-capable explorer would have too much blast radius | keep read-only/admin-scoped; require redaction/authorization and no mutation path before reconsidering |
 | HOLD | organization UX | Persona-scoped modules and collection-folder managers | `rpaddict/RisuBard` `9e2b5b26`, `0ffe502c`, `d922c28e` | potentially better organization for large libraries | product-level UX scope, not current performance/integrity priority | keep as reference until matching user need exists |
 
 ## Normalized classification overlays
@@ -73,6 +75,34 @@ Purpose: durable idea ledger for PocketRisu candidates and architectural lessons
 This section progressively backfills the common schema without deleting the historical compact rows above. It is authoritative when it names an existing idea.
 
 ### NO_SYSTEM_UPDATE
+
+#### P1 — Scoped Hypa query embedding cache + in-flight coalescing
+
+- Lifecycle: `DESIGN_NEEDED`
+- Source evidence: `nevaeh5379/HaejeokRisuai` `59c4eb7a8881e335d12fc49c627436dd689301bc`, `3a192633716f42ffa5a557de08ad99189568b668`.
+- System impact: `NO_SYSTEM_UPDATE`
+- Importance: `MEDIUM`
+- Difficulty: `LOW`
+- Size: `S`
+- Evidence: `MEDIUM`
+- Risk: `HIGH`
+- Dependencies: PocketRisu must first have an authenticated Node Hypa/vector execution boundary; provider/credential fingerprint contract; session-scope identity; server-phone embedding workload measurement.
+- Priority: `P1`
+- PocketRisu benefit: repeated and concurrent memory-retrieval queries can reuse or join one embedding request, lowering provider calls, latency, and server work while bounding RAM with entry/byte limits.
+- Main conflict/risk: an incorrect key or scope can leak derived information across users/providers; cache clears must not allow stale in-flight work to repopulate state. High risk means this remains blocked despite low implementation difficulty.
+- Validation need: prove no cross-scope/provider/credential reuse; concurrent identical calls coalesce; clear increments an epoch so old work cannot repopulate/rejoin; bounds evict correctly; provider failures reject all waiters cleanly; disabling cache preserves prior results.
+- Follow-up: design-only sub-slice of the Node Hypa boundary; do not implement independently of the execution/session contract.
+
+Design draft:
+- Problem/evidence: HaejeokRisuai shows bounded per-scope LRU query embeddings and, one commit later, in-flight request joining plus epoch-based invalidation with concurrency tests. Evidence is credible code-level behavior but not yet PocketRisu workload evidence.
+- Minimal safe scope: cache only query embeddings for one explicitly supported Node Hypa provider path; no document/source-memory caching and no persistence in the first slice.
+- Ownership boundaries: Node executor owns transient derived vectors; authenticated session scope and provider configuration define reuse boundaries; authoritative chats/memory remain outside the cache.
+- Proposed mechanism: key by scope + normalized provider/model + one-way credential fingerprint + query text; cap both entries and bytes; coalesce only matching in-flight keys from the same current cache epoch; cache clear advances the scope epoch and removes metrics/entries without cancelling unrelated fresh requests.
+- Compatibility/invariants: cache miss/disabled cache is behaviorally identical to current execution; no durable data semantics change; no cross-scope reuse; clear cannot resurrect stale entries; cancellation/failure never commits partial durable memory state.
+- Acceptance criteria: deterministic result parity with cache disabled; one backend request for N concurrent identical queries; stale pre-clear request cannot repopulate or be joined after clear; hard memory bounds hold; failures fan out without leaked in-flight entries.
+- Risk/blast radius: privacy/session isolation is the main high-risk boundary; contain it by making reuse scope explicit and keeping the feature transient and disableable.
+- Rollback/fallback: feature flag/config can disable query caching/coalescing and fall back to direct embedding calls with no migration.
+- PR decomposition: (1) cache-key/scope invariants + tests, (2) bounded LRU, (3) in-flight coalescing + clear epoch race tests, (4) metrics only after authorization/redaction review.
 
 #### P2 — Node-owned Hypa memory orchestration boundary
 
@@ -105,7 +135,7 @@ Design draft:
 #### P2 — Persistent derived vector-index cache
 
 - Lifecycle: `DESIGN_NEEDED`
-- Source evidence: `nevaeh5379/HaejeokRisuai` `d23a24a6ec747dcf21f671a095da9dedd60c3356`.
+- Source evidence: `nevaeh5379/HaejeokRisuai` `d23a24a6ec747dcf21f671a095da9dedd60c3356`, shutdown-flush follow-up `3a192633716f42ffa5a557de08ad99189568b668`.
 - System impact: `NO_SYSTEM_UPDATE`
 - Importance: `MEDIUM`
 - Difficulty: `MEDIUM`
@@ -116,28 +146,46 @@ Design draft:
 - Priority: `P2`
 - PocketRisu benefit: reuse unchanged embeddings/indexes after Node restart instead of rebuilding every document vector, reducing restart recovery latency, embedding calls, and CPU work.
 - Main conflict/risk: a stale or corrupt cache must never become authoritative; embeddings may contain sensitive derived information; disk pruning and backup/export behavior must be explicit.
-- Validation need: benchmark cold rebuild vs warm restore; corrupt/truncate cache files; change revision/signature; exceed disk cap; restart during write; verify permissions and that cache exclusion does not hide user-authored source data.
+- Validation need: benchmark cold rebuild vs warm restore; corrupt/truncate cache files; change revision/signature; exceed disk cap; restart during write; graceful SIGINT/SIGTERM with pending debounced writes; verify permissions and that cache exclusion does not hide user-authored source data.
 - Follow-up: design/prototype as disposable cache only; do not couple it to DB/save integrity semantics.
 
 Design draft:
-- Problem/evidence: HaejeokRisuai persists metadata separately from Float32 payloads, uses atomic temp-write+rename, lazy restore, signature/revision validation, private permissions, hashed filenames, and bounded disk LRU. This is strong implementation evidence but not yet PocketRisu workload evidence.
+- Problem/evidence: HaejeokRisuai persists metadata separately from Float32 payloads, uses atomic temp-write+rename, lazy restore, signature/revision validation, private permissions, hashed filenames, bounded disk LRU, and now explicitly flushes pending vector snapshots during graceful shutdown. This is strong implementation evidence but not yet PocketRisu workload evidence.
 - Minimal safe scope: persist only a single existing Node retrieval index family as a disposable derived artifact; no migration of source data and no effect on browser/Web paths.
 - Ownership boundaries: authoritative documents/revisions stay in normal PocketRisu storage; the server cache owns only recomputable embeddings/index metadata under an internal cache directory.
-- Mechanism: key cache files by opaque hash; encode version + index id + revision + dimension + per-entry signature metadata plus binary Float32 payload; atomic write+fsync+rename; lazy load; reject on any format/revision/signature/size mismatch; bounded disk LRU.
+- Mechanism: key cache files by opaque hash; encode version + index id + revision + dimension + per-entry signature metadata plus binary Float32 payload; atomic write+fsync+rename; lazy load; reject on any format/revision/signature/size mismatch; bounded disk LRU; flush pending debounced snapshots on orderly shutdown only after new work is stopped.
 - Compatibility/invariants: cache miss/corruption is equivalent to no cache; save/backup/export correctness cannot depend on cache presence; existing save/integrity optimizations untouched; cache files are not user assets.
-- Acceptance criteria: warm restart reuses unchanged vectors; any revision/signature change rebuilds affected data; malformed/truncated/oversized cache is ignored safely; disk cap prunes oldest derived entries; cache removal causes only performance loss.
+- Acceptance criteria: warm restart reuses unchanged vectors; any revision/signature change rebuilds affected data; malformed/truncated/oversized cache is ignored safely; disk cap prunes oldest derived entries; graceful shutdown flushes pending derived writes without prolonging hard-failure recovery requirements; cache removal causes only performance loss.
 - Risk/blast radius: confined to Node retrieval performance if the cache is strictly non-authoritative; privacy requires restrictive permissions and no accidental exposure through asset/file APIs.
 - Rollback/fallback: delete/disable the cache directory and fall back to in-memory rebuild; no DB migration or rollback step required.
-- PR decomposition: (1) cache format/validation helpers + corruption tests, (2) one index persistence integration + warm/cold benchmark, (3) disk LRU/permissions, (4) optional expansion to other vector users.
+- PR decomposition: (1) cache format/validation helpers + corruption tests, (2) one index persistence integration + warm/cold benchmark, (3) disk LRU/permissions + shutdown flush, (4) optional expansion to other vector users.
+
+#### P2 — Read-only storage explorer for diagnostics
+
+- Lifecycle: `HOLD`
+- Source evidence: `nevaeh5379/HaejeokRisuai` `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42`.
+- System impact: `NO_SYSTEM_UPDATE`
+- Importance: `LOW`
+- Difficulty: `LOW`
+- Size: `S`
+- Evidence: `MEDIUM`
+- Risk: `MEDIUM`
+- Dependencies: authenticated/admin-only access contract; sensitive-column redaction policy; read-only backend capability; explicit prohibition on mutation APIs.
+- Priority: `P2`
+- PocketRisu benefit: easier inspection of WASM/OPFS/Node SQLite tables when debugging migrations, storage regressions, cache ownership, or import/export integrity.
+- Main conflict/risk: raw DB browsing can expose secrets or private chat/plugin data; turning it into a generic editor would create unnecessary persistence risk.
+- Validation need: prove all operations are read-only; pagination/search are bounded; unauthorized contexts cannot open endpoints; sensitive values are redacted or explicitly gated.
+- Follow-up: retain as diagnostics reference only; not a current implementation priority.
 
 ### SYSTEM_UPDATE_REQUIRED
 
-No new system-update candidate was found in the 2026-08-26 forward review. The two HaejeokRisuai changes are application/server-code changes and do not require OS/runtime/service-manager migration.
+No new system-update candidate was found in the 2026-08-26 forward review. Current HaejeokRisuai changes are application/server-code changes and do not require OS/runtime/service-manager migration.
 
 ## Forward review log
 
-- 2026-08-26: `nevaeh5379/HaejeokRisuai:main` advanced from `2ee2ef86065eb0037590317f1950fe389144af02` to `d23a24a6ec747dcf21f671a095da9dedd60c3356`. Reviewed exactly two new commits: `1d4b0c5c783b3f4ef5738c21a17192c07a6f3cbb` (Node-owned Hypa memory orchestration) and `d23a24a6ec747dcf21f671a095da9dedd60c3356` (persistent server vector indexes). Deduplicated the first into the existing Node execution-boundary idea and added the second as a new derived-cache candidate. Registry cursor advanced to `d23a24a6ec747dcf21f671a095da9dedd60c3356`.
-- 2026-08-26: all other active-source cursors compared identical to their registered branch HEADs during this pass; no forward cursor changes needed.
+- 2026-08-26: `nevaeh5379/HaejeokRisuai:main` advanced from `d23a24a6ec747dcf21f671a095da9dedd60c3356` to `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42`. Reviewed exactly three new commits: `59c4eb7a8881e335d12fc49c627436dd689301bc` (bounded scoped Hypa query cache + vector-cache controls), `3a192633716f42ffa5a557de08ad99189568b668` (in-flight query coalescing, clear-safe epochs, graceful persistent-vector write flush), and `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42` (browser SQLite explorer). Added one blocked P1 design candidate, strengthened the persistent-vector-cache design, and retained the explorer as P2/HOLD diagnostics evidence. Registry cursor advanced to `c19d5bfb5c91ca2a9fed8c1f08475d726ac70e42`.
+- 2026-08-26: prior forward pass reviewed `nevaeh5379/HaejeokRisuai:main` from `2ee2ef86065eb0037590317f1950fe389144af02` to `d23a24a6ec747dcf21f671a095da9dedd60c3356`, covering `1d4b0c5c783b3f4ef5738c21a17192c07a6f3cbb` (Node-owned Hypa memory orchestration) and `d23a24a6ec747dcf21f671a095da9dedd60c3356` (persistent server vector indexes).
+- 2026-08-26: `rpaddict/RisuBard`, `kwaroran/Risuai`, `kwaroran/Risuai-Next`, `PocketRisu/PocketRisu:develop`, and `TripleHwang/RisuVault` were rechecked at their registered heads during this pass. No cursor changes were needed for those confirmed sources; remaining low-traffic active sources retain their previous cursors pending the next bounded verification pass.
 - Historical backfill milestone did not advance in this pass; forward traffic took precedence and several active sources still lack proven complete pre-2026-08-26 coverage.
 
 ## Recording rules
