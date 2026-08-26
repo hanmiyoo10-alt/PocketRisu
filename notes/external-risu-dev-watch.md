@@ -41,6 +41,17 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
   - Branch: `main`
   - Last reviewed HEAD: `128482ce9984a30ecb68834d561169846d068295`
 
+## Discovery pool
+
+Do not blindly promote every GitHub fork to active monitoring. Compare candidates against the closest upstream/base and promote only repositories with distinct code, architecture, patches, tooling, or maintained divergence worth mining. Exact mirrors and abandoned zero-diff forks stay discovery-only.
+
+Seeded full-code candidates discovered on 2026-08-26 include:
+
+- RisuAI-family: `kangjoseph90/RisuAI` (`patchsync`), `risuai/RisuAI` (`main`), `shenruotong/risuai` (`main`), `jeong-jimin-github/RisuAI-KAI` (`main`), `dilluti0n/RisuAI` (`electron-port`), `Pyser08/RisuAI` (`main`), `Pyser08/Risuai-custom` (`main`), `yas-zoa/RisuAI` (`master`), `tresbien-rai/RisuAI` (`main`), `devforai-creator/RisuAI-Hardened` (`main`), `ChatPoongKun/RisuMaou` (`main`), `Budy123/RisuaiClone` (`main`), `magicarslan2007-ctrl/Risuai` (`main`), `sunnyark/Risuai` (`main`), `darthzoloft/Risuai` (`main`), `linyue404/Risuai` (`main`), `misov1/Risuai` (`main`), `octo-patch/Risuai` (`main`), `tiwentichat/RisuAI` (`main`).
+- PocketRisu-family: `myoun/PocketRisu` (`codex/main`), `Eclipses-Saros/PocketRisu`, `boounge2e-ai/PocketRisu`, `3ae3ae/PocketRisu`, `aCafela-coffee/PocketRisu`, `SameDesu123/PocketRisu`, `canister2668/PocketRisu`, `EvoLinkAI/PocketRisu`, `noelkim12/PocketRisu`, `Fau57/PocketRisu`, `repryty/PocketRisu`, `rpaddict/PocketRisu`, `IHaBiS02/PocketRisu`, `shittim-plana/PocketRisu`, `0-Elisha-1/PocketRisu`, `empty1313/PocketRisu`, `hyomibam/PocketRisu`, `Laily6026/PocketRisu`, `georgeatparallel/PocketRisu`, `Pycnocline/PocketRisu`, `Gynephobia/PocketRisu`, `rhplus0831/PocketRisu` (`serve-prd`), `rakey0/PocketRisu`, `hvboq/PocketRisu`, `LemonDouble/PocketRisu`, `universebaby1020/PocketRisu`, `pnya2021/PocketRisu` (`pnya/main`), `yas-zoa/PocketRisu`, `minsawook/PocketRisu-in-server`, `TrissElan/ServerRisu`, `lunayeon82/PocketRisu`, `wuhaoyu050721/PocketRisu`.
+
+Also search the wider ecosystem periodically for Risu-related storage, backend, sync, monitoring, memory, plugin, import/export, and deployment projects. Ecosystem projects are idea sources, not automatic code-port sources.
+
 ## Historical source
 
 - `nevaeh5379/Risuai:dev` — retired as a forward source; preserve for historical backfill only. Original watch cursor: `584738fc73936c696965d7578984fd32d5e913a6`.
@@ -54,7 +65,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 5. bounded-context and narrative-memory techniques
 6. Node/self-host performance and save integrity
 7. backup/restore and crash-recovery safety
-8. reusable upstream/base-Risu, Risuai-Next, RisuVault, K-Risu, PocketRisu-Kei, PocketRisu-kotono, Kei-Risu, and PocketRisu-Alter architecture ideas that PocketRisu may have missed
+8. reusable architecture, safety, storage, memory, import/export, and deployment ideas from any Risu-family variant
 9. PocketRisu's own architectural fixes, regressions, and adopted invariants worth preserving as design knowledge
 
 ## Guardrails
@@ -69,4 +80,10 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
 
 ## Automation rule
 
-When any active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`. When forward traffic is quiet, continue bounded historical backfill across every active source (including Risuai-Next, both RisuVault repositories, K-Risu, PocketRisu-Kei, PocketRisu-kotono, Kei-Risu, and PocketRisu-Alter) without moving active cursors backward. Notify only for meaningful candidates, risks/regressions, or newly discovered historical ideas.
+1. Treat the Active sources section as the durable registry for forward cursors.
+2. When an active source advances, review only commits newer than that source's cursor, classify meaningful transferable ideas, update the cursor, and write deduplicated ideas to `notes/external-risu-ideas.md`.
+3. When forward traffic is quiet, continue bounded historical backfill without moving active cursors backward.
+4. In bounded discovery passes, search GitHub for `RisuAI`, `Risuai`, `PocketRisu`, `RisuVault`, `RisuBard`, `RisuMaou`, `Kei-Risu`, and obvious related variants. Compare likely full-code forks to their nearest base. Promote a candidate to Active sources only if it has meaningful maintained divergence; initialize its cursor at the reviewed current HEAD and record why it was promoted in the idea backlog/history.
+5. Keep low-signal mirrors out of hourly active polling, but retain them in the discovery pool so later divergence can be detected.
+6. Review ecosystem tools/plugins when they expose transferable architecture or safety ideas, but do not confuse plugin-specific code with core PocketRisu architecture.
+7. Notify only for meaningful candidates, risks/regressions, newly promoted sources, or newly discovered historical ideas.
