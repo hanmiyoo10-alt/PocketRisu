@@ -1,9 +1,11 @@
-# External Risu idea backlog
+# Risu family idea backlog
 
-Purpose: durable idea ledger for PocketRisu candidates discovered from external Risu variants. This is not a cherry-pick queue; every item must be re-evaluated against PocketRisu architecture and guardrails.
+Purpose: durable idea ledger for PocketRisu candidates and architectural lessons discovered across the Risu family. This is not a cherry-pick queue; every item must be re-evaluated against PocketRisu architecture and guardrails. PocketRisu itself is also a source: preserve successful invariants, reversions, regressions, and design lessons instead of only hunting external code.
 
 ## Sources
 
+- `kwaroran/Risuai` (`main`) — upstream/base RisuAI
+- `PocketRisu/PocketRisu` (`develop`) — official PocketRisu upstream; record both candidates and already-adopted lessons
 - `nevaeh5379/HaejeokRisuai` (`main`)
 - `rpaddict/RisuBard` (`main`)
 - historical source retained for backfill only: `nevaeh5379/Risuai` (`dev`)
@@ -12,6 +14,7 @@ Purpose: durable idea ledger for PocketRisu candidates discovered from external 
 
 - 2026-08-26: backfilled the old `nevaeh5379/Risuai:dev` history beyond the original watch baseline, including commits at least through 2026-08-18, and deduplicated transferable ideas into this ledger.
 - 2026-08-26: reviewed the visible `rpaddict/RisuBard:main` history back to its initial public source commit on 2026-08-17 and recorded PocketRisu-relevant architectural/safety ideas.
+- 2026-08-26: seeded `kwaroran/Risuai:main` and `PocketRisu/PocketRisu:develop` as first-class sources. Initial scan captured current high-signal save/security/recovery lessons; older history remains eligible for bounded backfill.
 - Backfill is evidence-oriented, not exhaustive code adoption. If later history inspection reveals an older distinct idea, add it without rewriting or deleting the prior record.
 
 ## Status labels
@@ -36,7 +39,7 @@ Purpose: durable idea ledger for PocketRisu candidates discovered from external 
 | DESIGN_NEEDED | memory | Idle-batched inactive-chat memory release | `nevaeh5379/Risuai` `9c5ef605`, `e48296e3` | reduce retained memory in ultra-long sessions | accidental release of still-referenced reactive state | heap profiling + ownership boundaries |
 | DESIGN_NEEDED | long-chat | Active-chat message paging / compaction with absolute positions and non-destructive partial pages | `nevaeh5379/Risuai` `14be1584` | major long-chat memory/render reduction | high interaction with search/edit/navigation/plugin assumptions | prototype read window and compatibility matrix |
 | READY_TO_PORT | storage UI/perf | Paginate large asset/file lists; fetch thumbnails only for active page; dedupe in-flight thumbnail requests | `nevaeh5379/Risuai` `58b980ca` | constant-size DOM and fewer thumbnail request storms on huge stores | cross-page selection and cache invalidation semantics | inspect PocketRisu asset/browser lists for unbounded rendering/fetches |
-| DESIGN_NEEDED | asset integrity | Detect missing referenced assets and make orphan cleanup reference-aware/fail-safe | `nevaeh5379/Risuai` `1e4342cc`, `e46c9f29` | prevent silent broken characters/modules and accidental deletion of live thumbnails/assets | reference discovery must be complete; false negatives are destructive | build read-only missing/orphan report before any cleanup behavior |
+| DESIGN_NEEDED | asset integrity | Detect missing referenced assets and make orphan cleanup reference-aware/fail-safe | `nevaeh5379/Risuai` `1e4342cc`, `e46c9f29`; PocketRisu hardening `3b8b6401`, `3c6bdaf5` | prevent silent broken characters/modules and accidental deletion of live thumbnails/assets | reference discovery must be complete; false negatives are destructive | preserve fail-closed empty-reference refusal; expand reference tests whenever new asset domains appear |
 | DESIGN_NEEDED | recovery | Revision diff + impact-aware dry-run restore before destructive rollback | `nevaeh5379/Risuai` `60489e18` | safer backup/revision recovery and easier diagnosis | potentially large scope; must align with PocketRisu save format and backup model | map current recovery surfaces and define minimal preview contract |
 | DESIGN_NEEDED | I/O/perf | Stream large asset/backup payloads and batch DB writes instead of materializing giant buffers/JSON | `nevaeh5379/Risuai` `67bcfd47`, `eed465f8`, `a7fa3ee2` | lower peak memory and improve large backup/import/export reliability | streaming changes failure/rollback semantics | benchmark current peak RSS for large backup/asset operations |
 | DESIGN_NEEDED | storage architecture | Domain-specific stores with explicit dirty marking and serialized commits | `nevaeh5379/Risuai` `4f848221`, `46f39645`, `d6899df1` | clearer mutation ownership, smaller commits, fewer persistence races | major architectural migration; may conflict with existing optimized patch path | borrow invariants/tests first, not architecture wholesale |
@@ -54,19 +57,29 @@ Purpose: durable idea ledger for PocketRisu candidates discovered from external 
 | DESIGN_NEEDED | narrative memory/recovery | Rebuild long-term memory in a staging workspace and atomically publish only after resumable batches complete | `rpaddict/RisuBard` `3ae4501b` (BardWiki reboot plan), related workspace hardening `e4e18589` | crash-safe reindex/rebuild without exposing half-written memory | complex job state, model cost, source-specific architecture | retain as design reference for any future PocketRisu memory rebuild tool |
 | READY_TO_PORT | import safety | Await/serialize parallel imports so module assets cannot be lost by racing finalization | `rpaddict/RisuBard` `f27bb016`, `96a5350f` | safer bulk character/module imports | unnecessary serialization can slow imports | inspect current import concurrency and add race regression test |
 | DESIGN_NEEDED | backup safety | Harden local backup restore with explicit server limits and validated recovery ordering | `rpaddict/RisuBard` `80fe8e15` | safer restore against malformed/oversized inputs | exact limits depend on PocketRisu formats and device capacity | compare existing restore validation/size caps |
+| READY_TO_PORT | plugin security | Keep strong V3 APIs capability/permission-gated and explicitly retire unsafe legacy plugin install paths | base `kwaroran/Risuai` `26072043`, `839d190b` | reduce privilege surprises and legacy attack surface | compatibility impact for old plugins | compare PocketRisu V3 permission surface and legacy install behavior |
+| DESIGN_NEEDED | parser/security | Restore transformed CSS only from call-scoped parsed elements/markers after sanitization, never by raw string reinsertion | base `kwaroran/Risuai` `5cc5bc05` | preserve rich character CSS while avoiding sanitizer-bypass regressions | parser behavior is security-sensitive and may differ in PocketRisu | audit PocketRisu markdown/style pipeline before copying any technique |
+| HOLD | save architecture lesson | Do not replace snapshots with a reactive DB proxy unless write-side effects, descriptor writes, and self-subscription loops are proven safe | base `kwaroran/Risuai` revert `72ce7218` of incremental proxy layer | preserves a concrete failure lesson for future save optimization work | not a feature to port; a regression warning | require regression tests for effect loops, legacy descriptor writes, and settings mutations before similar refactors |
+| ADOPTED | save integrity | Recompute current ETag when a precondition arrives and bump revision identity after side-channel manifest edits | official `PocketRisu/PocketRisu:develop` `b95d0fa7` | prevents stale full writes from rolling back newer plugin/manifest state after restart/cache invalidation | ETag semantics must stay consistent across all write paths | preserve as an invariant when #66/#74-style storage architecture evolves |
+| ADOPTED | patch safety | Snapshot patch application safely and retain actionable patch-failure diagnostics | official PocketRisu `e2c6d157`; selective-clone work later reviewed in upstream PRs | safer rollback/diagnosis when patches fail | full structuredClone can be expensive on huge DBs | keep correctness invariant while optimizing cloning selectively |
+| ADOPTED | server-phone / large DB | Spill SQLite VACUUM temp to disk and preflight enough free space instead of copying multi-GB DBs in RAM | official PocketRisu `f437a4c8` | avoids OOM during DB maintenance on constrained/self-host devices | disk-space estimation and temp path portability | preserve for any future optimize/compact command |
+| ADOPTED | asset integrity | Orphan cleanup must include plugin-stored/legacy/specialized asset references and fail closed when reference discovery is suspect | official PocketRisu `3b8b6401`, `3c6bdaf5`, `729db6ad` | avoids destructive cleanup of live assets | every new asset-bearing feature can create a new hidden reference domain | add reference-discovery tests alongside new asset features |
+| DESIGN_NEEDED | plugin storage / browser memory | Externalize large plugin storage from the main browser DB object and hydrate per key/on demand | official PocketRisu direction discussed around upstream #73/#74 | attacks browser OOM at the source instead of only speeding server saves | migration, compatibility hydration, GC, snapshot/value lifetime | measure lazy hydration, duplicate fetch/parse, snapshot GC and legacy export hydrate hot paths |
 | HOLD | organization UX | Persona-scoped modules and collection-folder managers | `rpaddict/RisuBard` `9e2b5b26`, `0ffe502c`, `d922c28e` | potentially better organization for large libraries | product-level UX scope, not current performance/integrity priority | keep as reference until matching user need exists |
 
 ## Recording rules
 
-For every newly discovered meaningful external change:
+For every newly discovered meaningful change from any source:
 
 1. Add or update one deduplicated row rather than appending a duplicate idea.
 2. Record source repository and commit SHA(s) in `Source evidence`.
 3. Separate the transferable idea from source-specific implementation details.
-4. Classify as `READY_TO_PORT`, `DESIGN_NEEDED`, or `HOLD` based on current PocketRisu architecture.
+4. Classify as `READY_TO_PORT`, `DESIGN_NEEDED`, `HOLD`, `ADOPTED`, or `SUPERSEDED` based on current PocketRisu architecture.
 5. Preserve history when an item later becomes `ADOPTED` or `SUPERSEDED`.
 6. Link PocketRisu PR/commit/feature dossier in `Follow-up` once implementation starts.
 7. Historical scans must continue walking older unreviewed history when practical; do not assume the first automation cursor was the beginning of useful history.
+8. Base RisuAI is upstream evidence, not automatic authority. PocketRisu is implementation evidence, not proof that the current design is final. Record reversions and regressions with the same care as successful features.
+9. When the same idea appears in base RisuAI, PocketRisu, HaejeokRisuAI, and RisuBard, merge the evidence into one row and note architectural differences rather than creating four copies.
 
 ## PocketRisu guardrails
 
