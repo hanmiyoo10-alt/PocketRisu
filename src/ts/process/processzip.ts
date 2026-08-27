@@ -217,7 +217,7 @@ export class CharXImporter{
      * Handles three input types:
      * - ReadableStream: Streams data chunks as they arrive
      * - Uint8Array: Automatically converted to stream
-     * - File: Uses built-in stream() method
+     * - File: Reads bounded slices so Android content-provider-backed files do not depend on File.stream()
      *
      * After parse() completes:
      * - cardData and moduleData are immediately available
@@ -308,9 +308,28 @@ export class CharXImporter{
             return data
         }
 
-        // File has built-in stream() method
+        // Android WebView can expose content-provider-backed Files whose
+        // File.stream() implementation is unavailable or unreliable. Read
+        // bounded Blob slices instead while preserving the stream boundary.
         if(data instanceof File){
-            return data.stream()
+            let offset = 0
+            return new ReadableStream({
+                async pull(controller) {
+                    if (offset >= data.size) {
+                        controller.close()
+                        return
+                    }
+
+                    const end = Math.min(offset + CHUNK_SIZE_BYTES, data.size)
+                    const chunk = new Uint8Array(await data.slice(offset, end).arrayBuffer())
+                    if (chunk.byteLength === 0 && end > offset) {
+                        controller.error(new Error('Failed to read character card file'))
+                        return
+                    }
+                    controller.enqueue(chunk)
+                    offset = end
+                }
+            })
         }
 
         // Convert Uint8Array to stream, chunked to prevent blocking
@@ -348,7 +367,7 @@ export class CharXImporter{
      * Called for each chunk of file data as it streams in.
      * Accumulates chunks into buffer until file is complete.
      */
-    #handleFileData(fileName: string, data: Uint8Array, final: boolean) {
+    #handleFileData(fileName: string, data:Uint8Array, final:boolean) {
         this.assetBuffers[fileName].append(data)
         if(final){
             this.#handleFileComplete(fileName)
@@ -359,7 +378,7 @@ export class CharXImporter{
      * Called when a file has been completely read from the ZIP.
      * Routes files to appropriate handlers based on filename/extension.
      */
-    #handleFileComplete(fileName: string) {
+    #handleFileComplete(fileName:string) {
         const assetData = this.assetBuffers[fileName].buffer
 
         if(assetData.byteLength > MAX_ASSET_SIZE_BYTES){
