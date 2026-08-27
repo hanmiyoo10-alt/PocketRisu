@@ -24,7 +24,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
   - Last reviewed HEAD: `1284cc93853bdba80fc3aab537fad2817d695914`
 - Source: `TripleHwang/RisuVault`
   - Branch: `main`
-  - Last reviewed HEAD: `f5976baf5027ecb37b8fd7d8a7aeb449c5a32ab3`
+  - Last reviewed HEAD: `3ed938b68a408e41268327450185da43f6a927f8`
 - Source: `seto-sama/PocketRisu-Kei`
   - Branch: `main`
   - Last reviewed HEAD: `3b55f692c02c04082b087547b0114506a5373681`
