@@ -27,6 +27,22 @@ manager의 `engineServiceEnvironmentReady()`는 engine run 파일의 전체 내�
 - 따라서 실제 run 파일은 수정되지 않았고 engine도 재시작되지 않음
 - 백업만 정상 생성됨
 
-다음 시도에서는 다중 shell quoting을 피하고 Node로 파일을 읽어 정확한 기준 라인 하나만 치환/삽입하는 방식으로 진행합니다. 수정 전에는 현재 run 파일 SHA256이 여전히 원본 값인지 다시 확인합니다.
+## Node 기반 env 패치 설치 성공
+
+두 번째 시도에서는 다중 shell/awk quoting을 피하고 Node로 run 파일을 읽어 정확한 기준 라인 뒤에 env 라인을 삽입했습니다.
+
+- 수정 직전 run 파일 SHA256은 원본 값과 동일
+- 새 백업: `run.bak-cli-env-node-20260830-034648`
+- 새 백업 SHA256은 원본과 동일
+- 기준 라인 `DEVPASS_BRIDGE_MANAGED_CLI=1` 정확히 1개
+- 기존 `LLMGATEWAY_CLI_VERSION` 라인 0개
+- 임시 결과에 `LLMGATEWAY_CLI_VERSION=1.10.0` 정확히 1개
+- `sh -n` 임시파일 검사: OK
+- diff는 기존 managed CLI env 바로 아래에 CLI version env 한 줄 추가뿐
+- atomic install 후 `sh -n`: OK
+- 설치 후 run 파일 SHA256: `617f2e4f7f1945c317f3c173fa233ae70c76a8b6f3002906b767384fcbcd4f6a`
+- engine은 아직 재시작하지 않았으므로 실행 중 프로세스에는 아직 새 env가 적용되지 않음
+
+다음 단계에서는 `local-usage-runtime-engine` 하나만 재시작하고, 새 PID의 `/proc/<pid>/environ`에서 `LLMGATEWAY_CLI_VERSION=1.10.0` 적용을 확인한 뒤 engine health/circuit 및 인증된 `/devpass-status`, `/orgs`를 재검증합니다. 이 A/B 테스트가 성공한 뒤에만 manager의 `writeEngineService()`에 해당 env를 영구 생성하도록 최소 수정할지 결정합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
