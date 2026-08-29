@@ -103,14 +103,23 @@ generic bridge는 인증 토큰이 필수이므로 다음 검사에서는 토큰
 
 현재 가장 중요한 관찰은 **generic bridge가 정상 응답하면서도 snapshot 데이터가 0으로 비어 있다는 점**입니다. 재부팅 직후 로컬 플러그인이 죽은 것처럼 보였던 현상은 generic bridge 프로세스 부재보다, 뒤쪽 manager/engine/CLI/upstream 데이터 공급 또는 snapshot 갱신 체인이 아직 준비되지 않았던 상태와 더 잘 맞습니다.
 
-다음 검사는 manager/engine 소스에서 실제 인증 헤더 이름을 확인한 뒤, 비밀값을 출력하지 않고 동일한 token 파일을 요청 헤더에만 사용해 `/status`, `/devpass-status`, `/orgs`, `/v1/summary`를 인증 상태로 호출합니다.
+## manager / engine 인증 헤더 확인
+
+소스 INSPECT_ONLY로 인증 규칙을 확인했습니다.
+
+- manager `39119`는 token 파일을 읽은 뒤 `X-Local-Bridge-Key` 또는 `X-DevPass-Bridge-Key` 중 하나가 일치하면 인증 성공
+- manager가 engine `39117`을 검증할 때도 동일 token을 `X-Local-Bridge-Key`와 `X-DevPass-Bridge-Key` 헤더에 사용
+- engine `39117`의 기능 API는 `X-DevPass-Bridge-Key`를 사용하며 token이 없거나 불일치하면 `Bridge token required`로 HTTP 401 반환
+- manager runit 설정의 token 파일은 `$HOME/.config/llmgateway-devpass-bridge/token`
+
+따라서 이전 무인증 401은 정상 인증 거절이며 장애로 해석하지 않습니다. 다음 단계는 token 값을 출력하지 않고 이 파일에서 읽어 manager `/status`와 engine `/devpass-status`, `/orgs`, `/v1/summary`를 인증 상태로 호출하는 것입니다.
 
 ## 현재 판정
 
 - generic local JSON bridge: 실행 중, 인증된 `/snapshot` HTTP 200
 - generic snapshot health는 `ok`이지만 usage 값은 현재 0
-- local-usage bridge manager: 프로세스 실행 중이나 `/status`는 인증 필요
-- local-usage bridge engine: `/health`는 정상, 기능 API는 인증 필요
+- local-usage bridge manager: 프로세스 실행 중, 인증 방식 확인 완료
+- local-usage bridge engine: `/health`는 정상, 기능 API 인증 방식 확인 완료
 - 세 서비스 모두 `down` 파일 없음
 - runsvdir 및 각 runsv 감독 프로세스는 수동 점검 시 정상
 - Termux:Boot → `start-services.sh` → `service-daemon start` → runsvdir 체인은 구성상 존재
@@ -118,6 +127,6 @@ generic bridge는 인증 토큰이 필수이므로 다음 검사에서는 토큰
 - 구조상 조건만으로 자동기동 성공을 판정했던 이전 판단은 철회
 - generic bridge는 부팅 시점부터 살아 있었던 것으로 보이지만 engine/manager는 이후 재기동 흔적이 있음
 - 현재 engine은 healthy지만 내부 circuit open 상태가 관찰되어 기능 계층 추가 확인 필요
-- 다음 단계는 실제 인증 헤더를 확인한 뒤 manager/engine 기능 API를 인증 상태로 검사하는 것
+- 다음 단계는 token 값을 노출하지 않고 manager/engine 기능 API를 인증 상태로 검사하는 것
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
