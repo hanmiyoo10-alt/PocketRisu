@@ -63,15 +63,33 @@ Termux:Boot에는 다음 파일이 존재합니다.
 - 이후 runit 재시도로 자동 복구됐는지는 아직 미확정
 - 구성 수정 전 INSPECT_ONLY로 부팅 로그와 현재 서비스/health 상태를 확인해야 함
 
+## 재부팅 후 로그/health 재확인 — 2026-08-29
+
+재부팅 후 약 3분 이상 경과한 시점에 INSPECT_ONLY로 로그와 서비스 상태를 재확인했습니다.
+
+- Termux:Boot 로그
+  - `18:46:22 boot=start`
+  - `18:46:23 runsvdir=ready`
+  - `18:47:54 tunnel=timeout`
+- reconnect watcher 로그
+  - `18:46:22 watcher=started`
+  - `18:46:27 state=down`
+  - 확인 시점까지 `state=up recovered=1` 없음
+- `pocketrisu-ssh-tunnel`은 `run` 상태였지만 PID 실행 시간이 수 초 수준으로 짧았음
+- `pocketrisu-notify-tunnel`도 `run` 상태였지만 PID 실행 시간이 0초 수준이었음
+- `pocketrisu-notify-relay`, `pocketrisu-reconnect-watch` 자체는 계속 `run`
+- core SSH 프로세스는 서버폰 Tailscale 목적지를 사용해 실행 중인 순간이 관찰됨
+- 그러나 `http://127.0.0.1:6001/api/health`는 즉시 연결 실패했고 `core_health=FAILED`
+- notify reverse SSH 프로세스는 같은 검사 시점의 `ps` 출력에 유지된 세션으로 확인되지 않음
+
+이 패턴은 runit 자체가 멈춘 것이 아니라 core/notify SSH 서비스를 반복 재기동하고 있으나 연결이 성립하지 않는 상태와 일치합니다. 즉 정적 runit 자동기동/재시도는 작동하지만, 재부팅 뒤 Tailscale 경로 또는 그 하위 네트워크 도달성이 준비되지 않아 자동복구가 완료되지 않은 것으로 판단합니다.
+
+아직 Tailscale 앱을 수동으로 열거나 서비스를 수동으로 재시작하지 않은 상태에서 원인을 더 확인해야 합니다. 다음 단계는 core/notify runit 로그와 서버폰 Tailscale SSH 목적지 TCP 8022 도달성을 INSPECT_ONLY로 확인하는 것입니다.
+
 ## 현재 판단
 
-정적 구성 기준으로는 재부팅 자동복구 조건이 상당 부분 충족되었습니다.
+정적 구성 기준으로 runit 자동기동/재시도는 동작하지만, 첫 실제 재부팅에서는 약 90초 대기 이후에도 core health가 회복되지 않았고 watcher도 down 상태에서 복구되지 않았습니다.
 
-- `runsvdir` 부팅 기동 경로 존재
-- core/notify/relay/watcher 모두 `down` 파일 없음
-- core/notify SSH 서비스는 foreground 프로세스 종료 시 runit 재기동 대상
-- reconnect watcher는 core health 복구 감시와 메인폰 복구 알림 담당
-
-하지만 첫 실제 재부팅에서 부팅 직후 PocketRisu 접속 불가가 관찰됐으므로, 자동복구 완료 판정은 보류합니다. 다음 단계는 현재 부팅 세션의 로그와 서비스 상태를 확인해 Tailscale 준비 지연 후 runit이 실제로 core/notify를 복구했는지 판별하는 것입니다.
+따라서 재부팅 자동복구는 현재 **실패**로 판정합니다. 원인은 아직 Tailscale Android VPN이 재부팅 후 자동으로 올라오지 않은 것인지, 올라왔지만 tailnet 경로가 준비되지 않은 것인지, 또는 다른 네트워크 문제인지 확정하지 않습니다.
 
 현재 단계에서는 구성 파일을 수정하지 않았습니다.
