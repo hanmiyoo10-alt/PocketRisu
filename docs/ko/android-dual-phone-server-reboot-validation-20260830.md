@@ -97,4 +97,18 @@ CLI version 1.10.0 적용 및 engine 정상화 과정에서 메인폰 PocketRisu
 
 현재 가장 유력한 실패층은 **Termux:Boot receiver가 부팅 시 실행되지 않았거나, Termux:Boot 앱 자체가 설치/활성 상태가 아닌 것**입니다. 다음 단계에서는 서비스나 코드를 더 수정하지 않고 Termux:Boot 패키지/앱 상태와 Android 측 boot receiver 실행 가능 조건만 INSPECT_ONLY로 확인합니다.
 
+## Termux:Boot 설치 여부 재확인
+
+패키지 조회를 `pm`과 `cmd package`로 분리해 재검사했습니다.
+
+- `pm path com.termux` 및 `pm path com.termux.boot`는 모두 `Failed transaction (2147483646)`로 실패하고 rc=2
+- `pm list packages`도 rc=2이므로 현재 Termux 환경에서 `pm` 결과는 설치 여부 판단에 사용할 수 없음
+- 반면 `cmd package path com.termux`는 Termux APK 경로를 정상 반환
+- `cmd package path com.termux.boot`도 Termux:Boot APK 경로를 정상 반환
+- `termux-info`의 Installed termux plugins에도 `com.termux.boot versionCode:1000`이 확인됨
+- 따라서 **Termux:Boot 앱은 서버폰에 설치되어 있음이 확정**됨
+- Termux 본체는 F-Droid release, version 0.118.3, Android 15 환경
+
+공식 Termux:Boot 사용 지침은 설치 후 launcher icon으로 Termux:Boot 앱을 한 번 실행해야 이후 boot 시 실행될 수 있다고 명시합니다. 다만 현재 서버폰에서 그 1회 실행 조건이 충족됐는지는 아직 확인하지 않았으므로 바로 수정하지 않고 package stopped/enabled 상태와 BOOT_COMPLETED receiver 노출 상태를 먼저 점검합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
