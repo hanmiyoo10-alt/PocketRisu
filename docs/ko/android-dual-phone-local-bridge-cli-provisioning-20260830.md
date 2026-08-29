@@ -150,6 +150,18 @@ manager 소스에서 확인된 상수/동작:
 - `/orgs` → HTTP 502, `CIRCUIT_OPEN`, organizations circuit 약 61초 후 재시도 안내
 - `/v1/summary` → HTTP 200, `ok=true`
 
-이 `CIRCUIT_OPEN`은 새 CLI provisioning 실패 증거가 아니라 기존 engine 인메모리 회로차단 상태의 잔여로 해석합니다. 우선 engine을 재시작하지 않고 안내된 retry 시간이 지난 뒤 인증된 live endpoint를 다시 호출해 자연 회복 여부를 확인합니다.
+## 자연 circuit 만료 대기 후에도 재오픈 확인
+
+engine을 재시작하지 않고 안내된 시간보다 긴 약 75초를 기다린 뒤 live endpoint를 다시 확인했습니다.
+
+- manager CLI 상태는 계속 `ready / 1.10.0 / ok`
+- engine `/health`는 계속 HTTP 200, `healthy`, version 1.6.27
+- `circuits.open`은 여전히 8
+- `/devpass-status`는 다시 HTTP 502 `CIRCUIT_OPEN`, 이번에는 account circuit 약 211초 후 재시도 안내
+- `/orgs`도 다시 HTTP 502 `CIRCUIT_OPEN`, organizations circuit 약 210초 후 재시도 안내
+
+따라서 이 상태를 단순한 과거 circuit 잔여로 해석할 수 없습니다. retry 시간이 만료된 뒤 다시 더 긴 시간으로 열렸으므로, 현재 engine의 실제 LLMGateway 호출 경로가 계속 실패하며 circuit breaker를 재오픈하고 있는 것으로 판단합니다.
+
+manager의 managed CLI 상태는 정상화됐지만, 장시간 유지 중인 engine 프로세스는 manager 패치/descriptor 갱신 이전 환경 또는 CLI 해석 상태를 계속 들고 있을 가능성이 있습니다. 다만 아직 engine 재시작으로 덮어쓰지 않고 다음 INSPECT_ONLY에서 engine이 CLI를 어떻게 찾고 실행하는지, 현재 프로세스 환경과 runit 설정이 어떤 경로를 전달하는지 먼저 확인합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
