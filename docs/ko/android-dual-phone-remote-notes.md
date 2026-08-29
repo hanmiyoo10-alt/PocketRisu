@@ -57,6 +57,9 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - `.local/state/pocketrisu-ssh-tunnel/current`의 `Connection refused` 다수는 2026-08-27 기록으로, 현재 시점의 장애를 의미하지 않음
 - `pidof com.tailscale.ipn` 및 `ps -A | grep -i tailscale`에서는 현재 Tailscale 프로세스가 보이지 않음
 - 이는 Tailscale Android 패키지가 설치되어 있으나 현재 앱/VPN 프로세스가 활성 상태로 보이지 않는다는 뜻이며, 로그인 상태 자체까지 단정할 수는 없음
+- Android 16 Termux에서 `settings get secure always_on_vpn_app` 및 `always_on_vpn_lockdown` 조회는 `Failed transaction (2147483646)`으로 실패함
+- `dumpsys package com.tailscale.ipn` 필터와 `dumpsys connectivity` VPN 필터도 유효 출력을 얻지 못함
+- 따라서 Termux 권한만으로 현재 always-on VPN/활성 VPN 여부를 확정하지 않으며, 이 빈 출력은 "VPN 없음"의 증거로 사용하지 않음
 - 현재 구조는 LAN 주소 `192.168.0.19`에 직접 의존하므로 서로 다른 네트워크로 분리되면 그대로는 접속할 수 없음
 - Tailscale 도입 시 core/notify 포워딩 구조 자체를 바꾸기보다 각 터널 서비스의 서버 목적지 주소만 Tailscale 주소 또는 MagicDNS 이름으로 치환하는 방향이 가장 단순함
 
