@@ -67,17 +67,40 @@ Termux:Boot 스크립트에서는 브릿지 이름이 직접 참조되지 않았
 
 또한 generic local JSON bridge의 기존 로그가 인증 토큰 값을 평문으로 출력하는 동작이 확인됐습니다. 해당 비밀값 자체는 문서에 기록하지 않으며, 이후 코드 수정 단계에서 토큰 값을 로그에 출력하지 않도록 하는 보안 정리 항목으로 남깁니다.
 
+## 현재 로컬 HTTP health / route 확인
+
+추가 INSPECT_ONLY에서 local-usage engine의 로컬 health endpoint를 직접 확인했습니다.
+
+- `GET http://127.0.0.1:39117/health` → HTTP 200
+- `ok=true`, `status=healthy`
+- engine version은 1.6.27
+- engine uptime은 약 8,854초
+- plugin update endpoint가 제공되고 있으며 권장 plugin version 정보도 정상 반환
+
+따라서 현재 시점에는 `bridge-engine.mjs` 프로세스뿐 아니라 HTTP engine 자체도 정상 응답 중입니다.
+
+다만 health 응답의 circuit 상태에서 `open` 항목 수가 8로 관찰됐습니다. 이는 엔진 프로세스 사망을 의미하지는 않지만, 내부 upstream/CLI 요청 계층에서 반복 실패로 일부 회로 차단 상태가 열려 있을 가능성을 시사합니다. 재부팅 직후 기능 미복구 현상과 직접 연결되는지는 아직 확인 전이며, manager 상태와 실제 endpoint 호출을 추가 확인해 구분합니다.
+
+소스 확인 결과:
+
+- generic local JSON bridge는 `127.0.0.1:39118`에서 동작하며 인증된 `GET /snapshot`을 제공
+- local-usage manager는 `127.0.0.1:39119`에서 동작하며 `GET /status` 및 engine 관리 endpoint를 제공
+- local-usage engine은 `127.0.0.1:39117`에서 `/health`, `/snapshot`, `/orgs`, `/devpass-status`, `/activity`, `/analytics`, `/v1/summary` 등을 제공
+
+generic bridge는 인증 토큰이 필수이므로 다음 검사에서는 토큰 파일을 직접 읽어 요청 헤더에만 사용하고 토큰 값을 stdout/stderr에 출력하지 않습니다.
+
 ## 현재 판정
 
 - generic local JSON bridge: 수동 점검 시 실행 중, runit 감독
 - local-usage bridge manager: 수동 점검 시 실행 중, runit 감독
-- local-usage bridge engine: 수동 점검 시 실행 중, runit 감독
+- local-usage bridge engine: 현재 HTTP health까지 정상
 - 세 서비스 모두 `down` 파일 없음
 - runsvdir 및 각 runsv 감독 프로세스는 수동 점검 시 정상
 - Termux:Boot → `start-services.sh` → `service-daemon start` → runsvdir 체인은 구성상 존재
 - **실제 재부팅 후 브릿지 기능 자동복구는 실패 관찰됨**
 - 구조상 조건만으로 자동기동 성공을 판정했던 이전 판단은 철회
 - generic bridge는 부팅 시점부터 살아 있었던 것으로 보이지만 engine/manager는 이후 재기동 흔적이 있음
-- 다음 단계는 세 브릿지의 실제 로컬 HTTP endpoint/health 상태와 manager/engine 초기화 상태를 수정 없이 확인하는 것
+- 현재 engine은 healthy지만 내부 circuit open 상태가 관찰되어 기능 계층 추가 확인 필요
+- 다음 단계는 manager `/status`와 generic bridge `/snapshot`을 실제 호출해 프로세스 생존과 기능 준비 상태를 분리 확인하는 것
 
 정확한 Tailscale 주소, 계정 정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
