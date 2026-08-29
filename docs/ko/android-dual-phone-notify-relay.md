@@ -72,9 +72,13 @@ SSH 목적지는 기존 LAN 주소에서 서버폰의 Tailscale 주소로 전환
 - 따라서 `서버폰 localhost → Tailscale reverse SSH → 메인폰 relay` 구간은 실제 HTTP 요청 기준으로 정상
 - core/local SSH tunnel 및 `/api/health`도 동시에 정상 유지
 
-## 아직 남은 최종 검증
+## 전체 알림 체인 최종 검증 — 2026-08-29
 
-서버폰에서 실제 PocketRisu 서버 endpoint `POST /api/termux-notify`를 localhost로 호출해 다음 전체 체인을 한 번 검증해야 합니다.
+서버폰에서 실제 PocketRisu 서버 endpoint `POST /api/termux-notify`를 localhost로 호출해 전체 체인을 검증했습니다.
+
+검증 시 서버폰 PocketRisu `GET /api/health`는 `ok=true`, `status=ready`로 응답했고, 이어서 `POST /api/termux-notify`가 HTTP 200과 `{ "ok": true }`를 반환했습니다. 같은 요청으로 메인폰 Android에 실제 PocketRisu 알림이 표시된 것도 확인했습니다.
+
+검증된 전체 경로:
 
 ```text
 서버폰 PocketRisu
@@ -83,6 +87,7 @@ SSH 목적지는 기존 LAN 주소에서 서버폰의 Tailscale 주소로 전환
   → Tailscale reverse SSH
   → 메인폰 receiver.cjs
   → 메인폰 termux-notification
+  → 메인폰 Android 알림 표시
 ```
 
-이 테스트에서도 Android 알림은 메인폰에만 생성되어야 합니다.
+따라서 PocketRisu notify relay의 Tailscale 전환은 end-to-end 기준으로 완료로 판정합니다. 서버폰은 relay 요청만 전달하며 Android 알림은 생성하지 않습니다.
