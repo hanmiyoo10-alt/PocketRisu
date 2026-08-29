@@ -59,4 +59,17 @@ BootActivity를 명시적으로 한 번 실행한 뒤 서버폰을 다시 재부
 
 다음 진단은 배터리 설정을 더 변경하지 않고, Android 15 부팅 뒤 `BOOT_COMPLETED` receiver가 실제 호출되었는지와 Termux:Boot의 JobScheduler/BootJobService 단계가 생성 또는 실행됐는지를 가능한 범위에서 INSPECT_ONLY로 확인하는 것입니다.
 
+## 최소 boot marker probe 준비 완료
+
+BootReceiver/JobScheduler 단계와 기존 PocketRisu 부팅 스크립트 내부 실패를 분리하기 위해, 기존 스크립트를 수정하지 않고 가장 앞 순서의 임시 probe `~/.termux/boot/00-boot-probe`를 추가했습니다.
+
+- probe 경로는 설치 전 비어 있음을 확인
+- mode `700`
+- `sh -n` syntax OK
+- probe는 실행 시 `~/.termux/boot-probe-last`에 `boot_probe_ran=1`과 실행 시각만 기록하고 즉시 종료
+- 기존 marker는 재부팅 전 삭제 완료
+- 기존 `00-pocketrisu-server`, `50-taskbridge`, runit 서비스 및 bridge 코드는 수정하지 않음
+
+다음 재부팅 뒤 marker가 존재하면 Termux:Boot가 최소한 boot script 실행 단계까지 도달한 것이고, marker가 없으면 BootReceiver/JobScheduler/BootJobService 경로 자체가 실행되지 않은 것으로 분리할 수 있습니다. SSH 8022와 core recovery는 marker 판정과 별도로 확인합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
