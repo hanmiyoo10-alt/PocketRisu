@@ -1,0 +1,55 @@
+# Android 듀얼폰 백엔드 연동 / 전력·발열 최적화 계획
+
+2026-08-29 기준 PocketRisu 듀얼폰 구성의 Tailscale, core, notify reverse tunnel, 메인폰 Android 알림, 메인폰 재부팅 자동복구까지 end-to-end 검증을 완료한 뒤 진행하는 다음 단계 계획입니다.
+
+## 현재 기준 상태
+
+- 메인폰과 서버폰이 서로 다른 실제 네트워크에서도 Tailscale 기반으로 연결됨
+- 메인폰 core SSH local forward 정상
+- 메인폰 notify SSH reverse forward 정상
+- 서버폰 `/api/termux-notify` → 메인폰 Android 알림 전체 경로 정상
+- 메인폰 Android `Always-on VPN` 활성화 후 재부팅 시 Tailscale 자동 연결 및 PocketRisu core/notify 자동복구 확인
+- `VPN 없이 연결 차단`은 꺼짐
+- 메인폰 Tailscale 배터리 설정은 현재 `최적화` 상태에서도 재부팅 검증 통과
+
+## 백엔드 연동 방향
+
+레포의 현재 self-hosting 실사용 서버는 `server/node` 경로입니다. `server/hono`는 향후 Node 서버 대체를 목적으로 개발 중인 구현이며 아직 완전한 실사용 전환 대상으로 보지 않습니다.
+
+따라서 현재 듀얼폰 환경의 백엔드 연동은 다음 원칙으로 진행합니다.
+
+1. 현재 서버폰에서 실제 동작 중인 Node 서버를 기준으로 함
+2. 네트워크/Tailscale 구성과 백엔드 코드를 한 번에 바꾸지 않음
+3. 서버폰의 현재 `server/node/server.cjs`에는 로컬 작업 트리 변경이 크므로 파일 전체를 덮어쓰거나 원격 `main` 버전으로 교체하지 않음
+4. 기존 notify relay 패치와 다른 로컬 개조를 보존한 채 백엔드 관련 변경만 별도로 식별하고 적용
+5. 수정 전 INSPECT_ONLY → 백업 → 최소 수정 → 로컬 health/API 검증 → 메인폰 경유 검증 순서를 유지
+
+## 전력·발열 최적화 방향
+
+메인폰과 서버폰의 역할이 다르므로 각각 별도로 측정합니다.
+
+### 메인폰
+
+주요 상시 부하는 Tailscale Android VPN, Termux/runit, core·notify SSH 터널, notify relay, reconnect watcher, Firefox/PocketRisu입니다.
+
+목표:
+- Tailscale Always-on 안정성은 유지
+- 불필요한 재연결/폴링을 줄여 CPU wakeup 감소
+- SSH keepalive와 watcher 주기가 과도한지 측정 후 조정
+- Firefox/PocketRisu 전면 사용 시와 대기 시 발열 차이 확인
+
+### 서버폰
+
+주요 상시 부하는 PocketRisu Node 서버, DB/스토리지 작업, local bridge류, sshd, Tailscale입니다.
+
+목표:
+- Node 프로세스의 idle CPU 확인
+- bridge/보조 서비스의 불필요한 polling 확인
+- 로그 과다 기록이나 반복 실패 루프 확인
+- 장시간 idle 상태에서 배터리 온도와 충전 중 발열을 분리해 관찰
+
+## 다음 단계
+
+구성 변경 전 양쪽 폰에서 배터리 상태, 온도, CPU 상위 프로세스, 관련 서비스 상태를 INSPECT_ONLY로 수집합니다. 결과를 바탕으로 실제 소비 원인을 먼저 좁힌 뒤 한 번에 한 항목만 변경하고 재측정합니다.
+
+정확한 Tailscale 주소, 계정 정보, 토큰 등 비밀/식별 정보는 이 문서에 기록하지 않습니다.
