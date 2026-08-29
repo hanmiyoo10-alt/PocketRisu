@@ -162,6 +162,18 @@ engine을 재시작하지 않고 안내된 시간보다 긴 약 75초를 기다�
 
 따라서 이 상태를 단순한 과거 circuit 잔여로 해석할 수 없습니다. retry 시간이 만료된 뒤 다시 더 긴 시간으로 열렸으므로, 현재 engine의 실제 LLMGateway 호출 경로가 계속 실패하며 circuit breaker를 재오픈하고 있는 것으로 판단합니다.
 
-manager의 managed CLI 상태는 정상화됐지만, 장시간 유지 중인 engine 프로세스는 manager 패치/descriptor 갱신 이전 환경 또는 CLI 해석 상태를 계속 들고 있을 가능성이 있습니다. 다만 아직 engine 재시작으로 덮어쓰지 않고 다음 INSPECT_ONLY에서 engine이 CLI를 어떻게 찾고 실행하는지, 현재 프로세스 환경과 runit 설정이 어떤 경로를 전달하는지 먼저 확인합니다.
+## engine 자체에도 1.14.0 기본값이 남아 있음
+
+추가 INSPECT_ONLY에서 `bridge-engine.mjs` 소스를 확인한 결과 manager와 별개로 engine 자체에도 다음 기본값이 존재했습니다.
+
+- `const CLI_VERSION = process.env.LLMGATEWAY_CLI_VERSION || '1.14.0';`
+- runit `local-usage-runtime-engine/run`은 `DEVPASS_BRIDGE_MANAGED_CLI=1`만 설정하고 `LLMGATEWAY_CLI_VERSION`은 설정하지 않음
+- 따라서 별도 환경변수가 없다면 engine의 effective CLI version은 1.14.0
+- engine은 managed CLI descriptor의 package/version을 자신의 `CLI_VERSION`과 strict 비교하고, 불일치하면 managed CLI를 ready로 인정하지 않음
+- fallback 실행 경로도 `@llmgateway/cli@${CLI_VERSION}`을 사용하므로 1.14.0을 요구할 수 있음
+
+현재 descriptor/state는 모두 1.10.0 `ready/ok`로 정상화됐지만, engine 소스 기본값이 1.14.0인 상태라 live 요청 실패와 circuit 재오픈을 설명합니다. 즉 manager 한 줄 수정만으로는 충분하지 않았고 **manager와 engine 양쪽의 CLI version pin을 실제 존재하는 1.10.0으로 일치시켜야 하는 구조**입니다.
+
+또한 이번 프로세스 PID 탐색은 `ps | awk` 검색식이 현재 검사 명령 자체의 문자열을 self-match해 shell PID를 잡았으므로, 해당 PID의 `/proc/.../environ` 출력은 engine 환경으로 사용하지 않습니다. 다음 검사는 `sv status local-usage-runtime-engine`에서 supervisor가 보고하는 실제 engine PID를 사용해 환경을 재확인하고, engine 파일의 `1.14.0` 단일 일치/해시/syntax를 PRECHECK한 뒤에만 최소 수정 여부를 결정합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
