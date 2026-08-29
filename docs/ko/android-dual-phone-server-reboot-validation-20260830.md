@@ -82,4 +82,19 @@ CLI version 1.10.0 적용 및 engine 정상화 과정에서 메인폰 PocketRisu
 
 다음 단계부터는 자동복구 테스트 자체는 실패로 확정하고, 서버폰 Termux를 수동으로 열어 **무엇이 자동 실행되지 않았는지 INSPECT_ONLY**로 확인합니다. 이 수동 실행 이후 상태는 재부팅 자동복구 증거로 사용하지 않습니다.
 
+## Termux 수동 실행 직후 서비스 기동 증거
+
+재부팅 자동복구 실패를 확정한 뒤 서버폰에서 Termux를 수동으로 열고 즉시 INSPECT_ONLY를 수행했습니다.
+
+- `sshd`, `pocketrisu`, `local-usage-runtime-manager`, `local-usage-runtime-engine`, `llmgateway-bridge`가 모두 run 상태로 보였지만 **모든 서비스 age가 약 2초**로 동일했습니다.
+- 이는 장시간 부팅 후 유지된 서비스가 아니라 Termux를 연 직후 한꺼번에 새로 시작된 패턴과 일치합니다.
+- `$PREFIX/etc/profile.d/start-services.sh`는 shell 시작 시 `service-daemon start`를 백그라운드로 실행하는 구조가 확인됐습니다.
+- 따라서 Termux 앱을 수동으로 여는 순간 profile script가 runit을 올리고, 그 결과 sshd/PocketRisu/local-usage 서비스들이 뒤늦게 기동한 것으로 보는 것이 가장 타당합니다.
+- 서버 Termux:Boot 스크립트 파일 자체는 존재하고 mode 700, `sh -n` syntax OK였습니다.
+- `.termux/boot` 디렉터리에는 `00-pocketrisu-server`와 `50-taskbridge`가 존재합니다.
+- 단순 `pm list packages | grep com.termux(.boot)?` 결과는 비어 있었지만, 이 한 결과만으로 Termux:Boot 앱 미설치를 확정하지는 않습니다. Android package 조회 권한/표시 제약 가능성을 별도 검사합니다.
+- `/proc/uptime` 출력이 비어 있었고 `ps -A` 필터도 결과가 없었으므로, 이 두 항목은 현재 Termux/Android 권한 환경에서 신뢰 가능한 증거로 사용하지 않습니다.
+
+현재 가장 유력한 실패층은 **Termux:Boot receiver가 부팅 시 실행되지 않았거나, Termux:Boot 앱 자체가 설치/활성 상태가 아닌 것**입니다. 다음 단계에서는 서비스나 코드를 더 수정하지 않고 Termux:Boot 패키지/앱 상태와 Android 측 boot receiver 실행 가능 조건만 INSPECT_ONLY로 확인합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
