@@ -148,8 +148,16 @@ Tailscale 앱을 열기 전에는 일반 인터넷은 정상인 반면 tailnet S
 
 따라서 두 번째 재부팅 테스트는 core/notify/relay/watcher가 모두 정상인 깨끗한 기준 상태에서 시작합니다. 이번 재부팅에서는 Tailscale 앱을 수동으로 열지 않고 약 2분 대기한 뒤 Firefox/PocketRisu 접속 여부를 먼저 확인해 `Always-on VPN` 단독 변경의 효과를 검증합니다.
 
+## 두 번째 메인폰 재부팅 성공 — 2026-08-29
+
+메인폰의 `Always-on VPN`만 켠 상태에서 두 번째 재부팅을 수행했습니다. `VPN 없이 연결 차단`은 계속 꺼져 있었고, Tailscale 앱 배터리 설정도 `최적화` 그대로 유지했습니다.
+
+재부팅 직후 사용자가 Tailscale 앱을 수동으로 열지 않았는데도 Tailscale 연결이 자동으로 활성화된 것이 관찰됐고, Firefox에서 PocketRisu 접속도 정상 동작했습니다.
+
+따라서 첫 재부팅 실패와 두 번째 재부팅 성공의 차이는 `Always-on VPN` 활성화이며, 현재 장치에서는 이 설정 하나만으로 재부팅 후 Tailscale 자동 연결과 PocketRisu core 자동복구가 해결된 것으로 판정합니다. 배터리 설정은 `최적화` 상태에서도 이번 재부팅 검증을 통과했으므로, 재부팅 자동기동 해결을 위해 즉시 `제한 없음`으로 변경할 필요는 확인되지 않았습니다.
+
 ## 현재 판단
 
-PocketRisu 측 부팅 자동기동과 runit 재시도 구조는 정상입니다. 실패 지점은 메인폰 Android의 Tailscale 자동 활성화입니다. 첫 재부팅에서는 Tailscale 앱을 수동으로 열면 tailnet과 core가 즉시 복구되고 reconnect watcher 알림까지 정상 동작했습니다.
+PocketRisu/Termux 쪽 부팅 자동기동과 runit 재시도 구조는 정상입니다. 첫 재부팅 실패의 직접 원인은 메인폰 Android에서 Tailscale VPN이 자동 활성화되지 않았던 것이며, `Always-on VPN` 활성화 후 두 번째 재부팅에서는 Tailscale이 자동 연결되고 PocketRisu도 정상 접속됐습니다.
 
-현재는 `Always-on VPN`만 추가 활성화한 상태이며, 두 번째 재부팅으로 이 설정 하나가 자동복구 문제를 해결하는지 검증합니다. PocketRisu/SSH 구성 자체는 추가 수정하지 않았습니다.
+따라서 **core 기준 재부팅 자동복구는 해결 완료**로 판정합니다. 다음 남은 검증은 같은 두 번째 부팅 세션에서 notify reverse tunnel과 메인폰 Android 알림까지 재부팅 후 자동복구됐는지 확인하는 것입니다. PocketRisu/SSH 구성 자체는 추가 수정하지 않았습니다.
