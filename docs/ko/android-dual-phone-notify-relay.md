@@ -91,3 +91,16 @@ SSH 목적지는 기존 LAN 주소에서 서버폰의 Tailscale 주소로 전환
 ```
 
 따라서 PocketRisu notify relay의 Tailscale 전환은 end-to-end 기준으로 완료로 판정합니다. 서버폰은 relay 요청만 전달하며 Android 알림은 생성하지 않습니다.
+
+## 서로 다른 망 실사용 조건 확인 — 2026-08-29
+
+사용자 확인 기준으로 메인폰은 위 후반 검증들을 수행하기 전부터 약 30분 동안 Wi-Fi를 끄고 모바일 데이터만 사용하고 있었습니다. 서버폰은 기존 Wi-Fi 연결 상태를 유지했습니다.
+
+따라서 해당 시간대에 성공한 다음 검증들은 동일 LAN이 아니라 서로 다른 액세스 네트워크에서 Tailscale을 통해 수행된 것으로 판정합니다.
+
+- 메인폰 core/local tunnel을 통한 PocketRisu `/api/health` 성공
+- notify reverse `39120` tunnel 정상 유지
+- 서버폰 `127.0.0.1:39120/health` → 메인폰 relay HTTP 200
+- 서버폰 `POST /api/termux-notify` → 메인폰 실제 Android 알림 도착
+
+터미널 출력만으로 Wi-Fi OFF 상태 자체를 독립적으로 증명할 수는 없으므로 이 판정은 테스트 당시 메인폰이 모바일 데이터 전용이었다는 사용자 확인을 조건으로 기록합니다. 이 조건하에서는 서로 다른 망에서의 core + notify end-to-end 실사용 검증까지 완료된 상태입니다.
