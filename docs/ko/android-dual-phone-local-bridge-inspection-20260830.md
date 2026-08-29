@@ -29,15 +29,31 @@ Termux:Boot 스크립트에서는 브릿지 이름이 직접 참조되지 않았
 
 따라서 현재 브릿지 계층은 Termux:Boot에서 개별 Node 프로세스를 직접 띄우는 구조가 아니라, runit 서비스 트리를 통해 관리되는 것으로 판단합니다.
 
+## runit 자동기동 전제 확인
+
+추가 INSPECT_ONLY에서 세 서비스의 자동기동 전제를 확인했습니다.
+
+- `llmgateway-bridge`: `down` 파일 없음, 현재 `run`
+- `local-usage-runtime-manager`: `down` 파일 없음, 현재 `run`
+- `local-usage-runtime-engine`: `down` 파일 없음, 현재 `run`
+- `runsvdir $PREFIX/var/service` 프로세스가 현재 실행 중
+- 세 서비스 각각의 `runsv` 감독 프로세스도 실행 중
+- 서버폰 `$HOME/.termux/boot/00-pocketrisu-server`가 `$PREFIX/etc/profile.d/start-services.sh`를 source함
+- `start-services.sh`는 `service-daemon start`를 백그라운드에서 호출해 Termux services/runit 감독 트리를 시작함
+
+이 조합이면 재부팅 후 Termux:Boot가 실행될 때 `service-daemon start`가 runsvdir를 올리고, `down` 파일이 없는 세 브릿지 서비스는 runit에 의해 자동 기동될 구조입니다. 따라서 브릿지 프로세스를 Termux:Boot에 개별 `node ...` 명령으로 중복 추가할 필요가 없으며, 그렇게 하면 runit과 중복 실행될 위험이 있으므로 하지 않습니다.
+
+단, 이는 구성상 자동기동 조건이 충족됐다는 판정이며 실제 재부팅 뒤 세 브릿지가 모두 다시 `run` 상태가 되는지는 아직 실재부팅 검증이 남아 있습니다.
+
 ## 현재 판정
 
-- generic local JSON bridge: 현재 실행 중
+- generic local JSON bridge: 현재 실행 중, runit 감독
 - local-usage bridge manager: 현재 실행 중, runit 감독
 - local-usage bridge engine: 현재 실행 중, runit 감독
-- Termux:Boot에 브릿지 직접 실행 명령은 없음
-- 브릿지 자동복구/자동재시작 책임은 runit 쪽에 있는 구조로 보임
-- 아직 재부팅 자동기동을 완전히 확정하지는 않음
-
-재부팅 자동기동 확정을 위해 다음으로 확인할 항목은 각 서비스 디렉터리의 `down` 파일 유무, 현재 `sv status`, 그리고 부팅 시 `runsvdir`를 올리는 `start-services.sh` 경로입니다.
+- 세 서비스 모두 `down` 파일 없음
+- runsvdir 및 각 runsv 감독 프로세스 정상
+- Termux:Boot → `start-services.sh` → `service-daemon start` → runsvdir → 브릿지 서비스의 자동기동 체인이 구성상 연결됨
+- 브릿지 직접 실행 명령을 Termux:Boot에 추가할 필요 없음
+- 실제 재부팅 후 자동기동 검증만 남음
 
 정확한 Tailscale 주소, 계정 정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
