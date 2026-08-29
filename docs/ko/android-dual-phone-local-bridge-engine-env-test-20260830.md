@@ -81,4 +81,22 @@ manager 현재 SHA256은 `fd42a554c0447375bf2c0abda3563b5f8e7ad3df8e4d6114b51554
 
 따라서 영구화 최소 패치는 bundled engine 파일을 수정하지 않고 manager의 `engineServiceManagedCliLine()`이 두 export 줄을 생성하도록 변경하고, `engineServiceEnvironmentReady()`가 `LLMGATEWAY_CLI_VERSION=${MANAGED_CLI_VERSION}` 존재도 확인하도록 강화하는 방식입니다. 이렇게 하면 이후 `writeEngineService()`가 run 파일을 재생성하더라도 engine effective CLI version이 manager provisioning version과 자동으로 일치합니다.
 
+## manager 영구화 패치 설치 성공
+
+PRECHECK 뒤 `bridge-manager.cjs`만 백업한 후 최소 영구화 패치를 설치했습니다.
+
+- 수정 직전 SHA256: `fd42a554c0447375bf2c0abda3563b5f8e7ad3df8e4d6114b515540c9540af55`
+- 백업: `bridge-manager.cjs.bak-engine-cli-env-permanent-20260830-035319`
+- 백업 SHA256은 수정 직전 값과 동일
+- 임시파일 `node --check`: OK
+- `engineServiceManagedCliLine()`은 기존 `DEVPASS_BRIDGE_MANAGED_CLI` export와 함께 `LLMGATEWAY_CLI_VERSION=${MANAGED_CLI_VERSION}` export도 생성하도록 변경
+- `engineServiceEnvironmentReady()`는 `LD_PRELOAD`, managed CLI enable 값, CLI version env 세 가지가 모두 준비됐는지 확인하도록 강화
+- diff는 위 두 논리 지점에만 한정
+- atomic install 후 `node --check`: OK
+- 설치 후 manager SHA256: `04704d7d6541abaf4295fc4db04a5280fe221e0b80137910c3c617aff7cac544`
+- bundled engine 파일은 수정하지 않음
+- 설치 직후 manager/engine은 모두 재시작하지 않음
+
+다음 단계에서는 `local-usage-runtime-manager`만 재시작해 새 manager 코드가 정상 기동하고 현재 수동 run 파일을 `engineServiceEnvironmentReady=true`로 계속 인정하는지 확인합니다. 이 단계에서는 engine을 재시작하지 않아 이미 정상화된 live API 상태가 그대로 유지되는지도 함께 검증합니다. 이후 별도 단계에서 manager의 실제 engine sync/run-file 재생성 경로를 사용해 새 env 라인이 자동 생성되는지 검증합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
