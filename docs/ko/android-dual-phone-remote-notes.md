@@ -78,7 +78,9 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 전환 직전 `pocketrisu-ssh-tunnel/run`과 `pocketrisu-notify-tunnel/run`을 `migration-backups` 아래에 같은 타임스탬프로 백업했으며, 두 백업 파일 생성 및 원본과 동일한 실행 권한을 확인함
 - `~/.ssh/known_hosts`에는 기존 LAN 주소의 TCP 8022 host key(ED25519/RSA/ECDSA)가 등록되어 있으나, Tailscale 주소의 TCP 8022 항목은 아직 등록되어 있지 않음을 확인함
 - 두 터널 모두 `StrictHostKeyChecking=yes`를 사용하므로 목적지 주소를 Tailscale로 치환하기 전에, 이미 fingerprint 일치가 검증된 Tailscale 주소 host key를 `known_hosts`에 안전하게 추가해야 함
-- 다음 전환 단계는 `known_hosts` 백업 → 검증된 Tailscale host key 추가 및 재확인 → 서버 목적지 주소 치환 → core/local forward 검증 → notify/reverse 검증 → Wi-Fi/모바일망 재검증 순으로 진행함
+- `known_hosts` 추가 직전 원본을 `migration-backups/known_hosts.bak-tailscale-*`로 백업했고 파일 생성도 확인함
+- host key 재수집/비교/추가를 한 번에 수행하려던 스크립트는 `set -e` 상태에서 `ssh-keyscan` 단계 직후 종료되어 실제 추가 단계까지 도달하지 않음. 따라서 `known_hosts`는 아직 수정되지 않았으며, 다음에는 `ssh-keyscan`의 실제 출력과 종료코드를 별도로 관찰한 뒤 추가 여부를 판단해야 함
+- 다음 전환 단계는 `ssh-keyscan` 진단 → 검증된 Tailscale host key 추가 및 재확인 → 서버 목적지 주소 치환 → core/local forward 검증 → notify/reverse 검증 → Wi-Fi/모바일망 재검증 순으로 진행함
 
 ## Tailscale 적합성 판단
 
