@@ -47,4 +47,18 @@ CLI version 1.10.0 적용 및 engine 정상화 과정에서 메인폰 PocketRisu
 - 짧은 tunnel PID age는 실제 연결 실패/재시작 가능성을 시사하므로 메인폰 tunnel 상태를 먼저 INSPECT_ONLY로 분리 진단해야 함
 - 서버폰 Termux/Tailscale/PocketRisu 앱은 아직 수동으로 열지 않고 테스트 상태를 보존
 
+## 메인폰 tunnel 재시작 루프 확인
+
+추가 INSPECT_ONLY에서 `pocketrisu-ssh-tunnel` 상태를 약 10초 동안 세 번 표본 확인했습니다.
+
+- sample 1 PID `30846`, age 0s
+- sample 2 PID `30921`, age 0s
+- sample 3 PID `30991`, age 0s
+- 5초 간격으로 PID가 계속 바뀌므로 runit의 SSH tunnel 재시작 루프가 확정됨
+- 올바르게 조립한 localhost core health probe도 HTTP `000`
+- 표본 순간 현재 SSH process가 보이지 않았으며, 빠른 재시작 사이 구간과 일치
+- service log 파일은 해당 예상 경로에서 찾지 못함
+
+따라서 현재 실패층은 PocketRisu frontend나 local-usage API가 아니라 **메인폰에서 서버폰으로 SSH tunnel을 세우는 단계**입니다. 다만 이 결과만으로는 서버폰 Tailscale 미연결과 서버 sshd 미기동을 구분할 수 없습니다. 다음 단계는 서버폰 앱을 수동으로 열지 않은 채 메인폰에서 tunnel과 동일한 대상에 1회성 SSH verbose 연결을 시도해 `timeout/no route`와 `connection refused/auth success`를 구분하는 것입니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
