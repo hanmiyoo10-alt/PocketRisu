@@ -129,6 +129,27 @@ manager 소스에서 확인된 상수/동작:
 - 설치본 SHA256: `fd42a554c0447375bf2c0abda3563b5f8e7ad3df8e4d6114b515540c9540af55`
 - 백업 SHA256: `35bf1562638a5cb0d25163eea1c795e8eeb1f721af2b1b6d4f15c05d15950854`
 
-이 단계에서는 **manager를 아직 재시작하지 않았습니다.** 따라서 파일 수정은 완료됐지만 현재 실행 중인 manager 프로세스는 여전히 수정 전 코드를 사용하고 있습니다. 다음 단계에서 `local-usage-runtime-manager`만 재시작한 뒤 managed CLI 상태와 engine 기능 API를 검증합니다.
+## manager 재시작 후 CLI 런타임 회복
+
+패치 설치 뒤 `local-usage-runtime-manager`만 재시작했습니다.
+
+- manager PID가 기존 프로세스에서 새 프로세스로 정상 변경됨
+- manager `/status` 첫 확인부터 HTTP 200
+- `cliRuntimeState=ready`
+- `cliRuntimeVersion=1.10.0`
+- `cliRuntimeProvisioning=ok`
+- `engineManaged=true`
+- `engineBundled=true`
+- `engineServiceEnvironmentReady=true`
+
+따라서 `MANAGED_CLI_VERSION`을 실제 설치 가능한 1.10.0으로 되돌린 최소 패치는 managed CLI 런타임 복구에 성공했습니다.
+
+다만 engine 프로세스는 재시작하지 않았기 때문에 이전 CLI 실패 시 누적된 circuit-breaker 상태가 메모리에 남아 있었습니다. manager 복구 직후:
+
+- `/devpass-status` → HTTP 502, `CIRCUIT_OPEN`, account circuit 약 62초 후 재시도 안내
+- `/orgs` → HTTP 502, `CIRCUIT_OPEN`, organizations circuit 약 61초 후 재시도 안내
+- `/v1/summary` → HTTP 200, `ok=true`
+
+이 `CIRCUIT_OPEN`은 새 CLI provisioning 실패 증거가 아니라 기존 engine 인메모리 회로차단 상태의 잔여로 해석합니다. 우선 engine을 재시작하지 않고 안내된 retry 시간이 지난 뒤 인증된 live endpoint를 다시 호출해 자연 회복 여부를 확인합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
