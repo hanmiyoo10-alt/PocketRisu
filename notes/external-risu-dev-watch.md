@@ -9,7 +9,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
   - Last reviewed HEAD: `b46e748658bc6f867d2a2915e34ad604dba91636`
 - Source: `rpaddict/RisuBard`
   - Branch: `main`
-  - Last reviewed HEAD: `5f5f80348509a034acb318563fb52ebef188a3f0`
+  - Last reviewed HEAD: `40b66b2e1ee149a60ef14f1654237aa0e5d6ffc6`
 - Source: `kwaroran/Risuai`
   - Branch: `main`
   - Last reviewed HEAD: `984f46b7306ca38312a043e0ef28d447f2a92766`
