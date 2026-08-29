@@ -67,4 +67,18 @@ manager의 `engineServiceEnvironmentReady()`는 engine run 파일의 전체 내�
 
 안전한 영구화 후보는 manager가 이미 사용하는 `MANAGED_CLI_VERSION`을 engine run 파일의 `LLMGATEWAY_CLI_VERSION` export에도 사용하도록 만드는 것입니다. 이 경우 manager provisioning과 engine effective CLI version이 같은 단일 버전 소스를 공유할 수 있습니다. 실제 수정 전에는 manager 현재 SHA, 관련 함수/문자열의 정확한 일치 수, 예상 diff를 다시 점검하고 백업합니다.
 
+## 영구화 패치 지점 PRECHECK
+
+manager 현재 SHA256은 `fd42a554c0447375bf2c0abda3563b5f8e7ad3df8e4d6114b515540c9540af55`이고 `MANAGED_CLI_VERSION`은 1.10.0입니다. 관련 함수 구조는 다음처럼 확인했습니다.
+
+- `engineServiceManagedCliLine()` 정의: 정확히 1개
+- 함수명 전체 참조: 정의 포함 총 2개
+- `writeEngineService()`는 `${engineServiceManagedCliLine()}` 결과를 그대로 run 파일에 삽입
+- 현재 함수는 `DEVPASS_BRIDGE_MANAGED_CLI` export 한 줄만 생성
+- `engineServiceEnvironmentReady()`는 run 파일 전체 일치가 아니라 필요한 export 줄의 `includes()` 여부만 검사
+- 현재 수동 run 파일에는 `DEVPASS_BRIDGE_MANAGED_CLI=1`과 `LLMGATEWAY_CLI_VERSION=1.10.0`이 모두 존재
+- manager syntax check: OK
+
+따라서 영구화 최소 패치는 bundled engine 파일을 수정하지 않고 manager의 `engineServiceManagedCliLine()`이 두 export 줄을 생성하도록 변경하고, `engineServiceEnvironmentReady()`가 `LLMGATEWAY_CLI_VERSION=${MANAGED_CLI_VERSION}` 존재도 확인하도록 강화하는 방식입니다. 이렇게 하면 이후 `writeEngineService()`가 run 파일을 재생성하더라도 engine effective CLI version이 manager provisioning version과 자동으로 일치합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
