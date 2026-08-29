@@ -52,6 +52,21 @@ Termux:Boot 스크립트에서는 브릿지 이름이 직접 참조되지 않았
 
 브릿지 프로세스를 Termux:Boot에 개별 `node ...` 명령으로 중복 추가하는 수정은 아직 하지 않습니다. runit과 중복 실행될 위험이 있으므로 실제 실패 원인을 먼저 확인합니다.
 
+## 재부팅 이후 프로세스 age 재점검
+
+재부팅 이후 현재 상태를 다시 확인한 결과 세 서비스 모두 현재는 `run` 상태였으나, 프로세스 시작 시점이 서로 달랐습니다.
+
+- `runsvdir` 및 `runsv llmgateway-bridge`: 약 2시간 38분
+- `generic_local_json_bridge.cjs`: 약 2시간 38분으로 runsvdir와 거의 같은 시점부터 유지
+- `bridge-engine.mjs`: 약 2시간 25분
+- `bridge-manager.cjs`: 약 1시간 30분
+
+따라서 generic local JSON bridge는 부팅 시 runit과 함께 올라온 것으로 보이지만, local-usage engine과 manager는 부팅 이후 다른 시점에 재기동된 흔적이 있습니다. 이는 사용자가 재부팅 직후 브릿지 기능이 살아나지 않았다고 관찰한 것과 양립하며, 현재 문제를 단순한 서비스 디렉터리 누락이 아니라 **부팅 초기화 순서 또는 local-usage manager/engine의 지연 재기동/재초기화 문제**로 좁힙니다.
+
+현재 세 runit 서비스에는 별도 `log/run` 체인이 확인되지 않았고 `$PREFIX/var/log/sv/<service>/current`도 존재하지 않아, 부팅 직후 stdout/stderr 오류를 사후 추적하기 어려운 상태입니다. 향후 수정 시에는 자동복구 로직과 별개로 최소한의 서비스 로그 보존도 고려합니다.
+
+또한 generic local JSON bridge의 기존 로그가 인증 토큰 값을 평문으로 출력하는 동작이 확인됐습니다. 해당 비밀값 자체는 문서에 기록하지 않으며, 이후 코드 수정 단계에서 토큰 값을 로그에 출력하지 않도록 하는 보안 정리 항목으로 남깁니다.
+
 ## 현재 판정
 
 - generic local JSON bridge: 수동 점검 시 실행 중, runit 감독
@@ -62,6 +77,7 @@ Termux:Boot 스크립트에서는 브릿지 이름이 직접 참조되지 않았
 - Termux:Boot → `start-services.sh` → `service-daemon start` → runsvdir 체인은 구성상 존재
 - **실제 재부팅 후 브릿지 기능 자동복구는 실패 관찰됨**
 - 구조상 조건만으로 자동기동 성공을 판정했던 이전 판단은 철회
-- 다음 단계는 수정 없이 재부팅 이후 서비스 상태/프로세스 시작 시각/브릿지 로그를 INSPECT_ONLY로 확인하는 것
+- generic bridge는 부팅 시점부터 살아 있었던 것으로 보이지만 engine/manager는 이후 재기동 흔적이 있음
+- 다음 단계는 세 브릿지의 실제 로컬 HTTP endpoint/health 상태와 manager/engine 초기화 상태를 수정 없이 확인하는 것
 
 정확한 Tailscale 주소, 계정 정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
