@@ -91,4 +91,16 @@ manager 소스에서 확인된 상수/동작:
 
 자동 재시도 스케줄러 추가는 별도 개선 사항으로 남길 수 있으나, 먼저 잘못된 비존재 버전 요구를 바로잡는 것이 최소 범위 수정입니다.
 
+## 수정 전 PRECHECK 결과
+
+실제 로컬 runtime 파일 수정 직전 PRECHECK를 완료했습니다.
+
+- 대상: `$HOME/.local/share/local-usage-dashboard/runtime/bridge-manager.cjs`
+- SHA256: `35bf1562638a5cb0d25163eea1c795e8eeb1f721af2b1b6d4f15c05d15950854`
+- 문자열 `1.14.0` 전체 일치 수: 정확히 1개
+- 단일 일치 위치: `const MANAGED_CLI_VERSION = '1.14.0';`
+- 현재 Node syntax check: `OK`
+
+따라서 다음 수정은 해당 상수 한 곳만 `1.10.0`으로 바꾸는 최소 변경으로 진행할 수 있습니다. 수정 직후에는 manager를 재시작하기 전에 백업 해시, diff, syntax를 먼저 검증합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
