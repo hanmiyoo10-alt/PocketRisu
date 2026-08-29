@@ -43,6 +43,28 @@ manager의 `engineServiceEnvironmentReady()`는 engine run 파일의 전체 내�
 - 설치 후 run 파일 SHA256: `617f2e4f7f1945c317f3c173fa233ae70c76a8b6f3002906b767384fcbcd4f6a`
 - engine은 아직 재시작하지 않았으므로 실행 중 프로세스에는 아직 새 env가 적용되지 않음
 
-다음 단계에서는 `local-usage-runtime-engine` 하나만 재시작하고, 새 PID의 `/proc/<pid>/environ`에서 `LLMGATEWAY_CLI_VERSION=1.10.0` 적용을 확인한 뒤 engine health/circuit 및 인증된 `/devpass-status`, `/orgs`를 재검증합니다. 이 A/B 테스트가 성공한 뒤에만 manager의 `writeEngineService()`에 해당 env를 영구 생성하도록 최소 수정할지 결정합니다.
+## engine 재시작 A/B 테스트 성공
+
+수동 run-file env override를 설치한 뒤 `local-usage-runtime-engine`만 재시작해 원인 가설을 검증했습니다.
+
+- engine PID가 기존 프로세스에서 새 PID로 정상 변경됨
+- 새 PID `/proc/<pid>/environ`에서 `DEVPASS_BRIDGE_MANAGED_CLI=1` 확인
+- 새 PID `/proc/<pid>/environ`에서 `LLMGATEWAY_CLI_VERSION=1.10.0` 확인
+- engine `/health` 첫 확인부터 HTTP 200, `healthy`, version 1.6.27
+- 재시작 직후 `circuits.open=0`
+- manager `/status`: HTTP 200, `cliRuntimeState=ready`, `cliRuntimeVersion=1.10.0`, `cliRuntimeProvisioning=ok`
+- `engineManaged=true`, `engineBundled=true`, `engineServiceEnvironmentReady=true`
+- engine `/devpass-status`: HTTP 200
+- engine `/orgs`: HTTP 200
+- engine `/v1/summary`: HTTP 200
+- live API 호출 후에도 `/health`의 `circuits.open=0`
+
+이 결과로 engine의 기본 CLI version `1.14.0`이 live DevPass/organization 요청 실패와 circuit 재오픈의 실제 원인이었음을 A/B로 확인했습니다. manager provisioning을 1.10.0으로 정상화한 뒤에도 engine이 1.14.0을 effective version으로 쓰면 live 요청이 실패했고, engine 실행 환경에 1.10.0 override를 주자 즉시 정상화됐습니다.
+
+## 영구화 방향
+
+현재 run-file 수정은 기능적으로 성공했지만 `writeEngineService()`가 run 파일을 재생성할 때 `LLMGATEWAY_CLI_VERSION` 라인을 만들지 않으므로 영구 수정으로 보지 않습니다. 다음 단계에서는 bundled engine 파일 자체의 SHA는 건드리지 않고 manager 쪽 run-file 생성 로직을 점검합니다.
+
+안전한 영구화 후보는 manager가 이미 사용하는 `MANAGED_CLI_VERSION`을 engine run 파일의 `LLMGATEWAY_CLI_VERSION` export에도 사용하도록 만드는 것입니다. 이 경우 manager provisioning과 engine effective CLI version이 같은 단일 버전 소스를 공유할 수 있습니다. 실제 수정 전에는 manager 현재 SHA, 관련 함수/문자열의 정확한 일치 수, 예상 diff를 다시 점검하고 백업합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
