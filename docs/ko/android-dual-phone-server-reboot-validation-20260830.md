@@ -1,0 +1,37 @@
+# Android 듀얼폰 서버폰 재부팅 검증 — 2026-08-30
+
+서버폰의 local-usage/DevPass 브릿지 영구화 완료 뒤 실제 재부팅 자동복구를 검증하기 위한 기록입니다.
+
+## 재부팅 전 baseline
+
+재부팅 직전 서버폰에서 다음 상태를 확인했습니다.
+
+- `pocketrisu`, `sshd`, `local-usage-runtime-manager`, `local-usage-runtime-engine`, `llmgateway-bridge` 모두 run 상태
+- 위 서비스 모두 `down` 파일 없음
+- engine run 파일 syntax OK
+- engine run 파일에 `DEVPASS_BRIDGE_MANAGED_CLI=1` 및 `LLMGATEWAY_CLI_VERSION=1.10.0` 존재
+- engine run 파일 SHA256: `617f2e4f7f1945c317f3c173fa233ae70c76a8b6f3002906b767384fcbcd4f6a`
+- manager syntax OK
+- manager SHA256: `04704d7d6541abaf4295fc4db04a5280fe221e0b80137910c3c617aff7cac544`
+- manager `MANAGED_CLI_VERSION=1.10.0`
+- 서버 Termux:Boot 스크립트 syntax OK
+- 부팅 스크립트는 초기화 동안 wake lock을 잡고 PocketRisu health 대기 후 wake unlock하는 현재 구조 유지
+- PocketRisu local health HTTP 200
+- bridge engine health HTTP 200
+- 인증된 manager status HTTP 200
+- 인증된 `/devpass-status`, `/orgs`, `/v1/summary` 모두 HTTP 200
+- engine status `healthy`, version 1.6.27, `circuits.open=0`
+
+따라서 재부팅 전 backend/bridge 기준점은 정상입니다.
+
+## 실사용 상태
+
+CLI version 1.10.0 적용 및 engine 정상화 과정에서 메인폰 PocketRisu가 실제로 다시 연결된 것이 사용자 관점에서 이미 확인되었습니다. 따라서 API health뿐 아니라 실제 PocketRisu 연결 복구도 재부팅 전 정상 상태로 간주합니다.
+
+## 재부팅 검증 원칙
+
+서버폰 재부팅 뒤에는 먼저 서버폰의 Termux/Tailscale/PocketRisu 앱을 수동으로 열지 않은 상태에서 메인폰 쪽 원격 경로가 자동으로 돌아오는지 확인합니다. 이것은 서버폰 Tailscale 자동 연결과 sshd/PocketRisu 부팅 복구를 함께 검증하기 위함입니다.
+
+그 뒤에만 서버폰에서 runit 서비스, manager CLI runtime 1.10.0, engine run env, live DevPass/org API, circuit 상태를 확인합니다. 예상과 다른 결과가 나오면 다른 서비스까지 재시작하지 않고 그 지점에서 원인을 좁힙니다.
+
+정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
