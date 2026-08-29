@@ -50,6 +50,19 @@ Termux:Boot에는 다음 파일이 존재합니다.
 
 따라서 실제 SSH 재접속 책임은 watcher가 아니라 runit에 있습니다. core/notify 터널의 `run` 스크립트는 `ssh`를 foreground로 `exec`하므로 네트워크 또는 Tailscale 미준비 상태에서 SSH가 종료되면 runit이 해당 서비스 스크립트를 다시 실행할 수 있는 구조입니다. Tailscale Android VPN이 Termux:Boot보다 늦게 준비되는 경우에도 이 재실행 구조로 복구될 가능성이 높습니다.
 
+## 첫 실제 메인폰 재부팅 관찰 — 2026-08-29
+
+서버폰은 그대로 둔 채 메인폰을 재부팅했습니다. 재부팅 직후 사용자가 의도한 Firefox 선확인보다 Termux 쪽 부팅 동작이 먼저 화면에 나타났고, 그 시점 PocketRisu 접속은 `연결할 수 없음` 상태 및 장시간 로딩으로 관찰됐습니다.
+
+이 관찰만으로는 자동복구 최종 실패를 의미하지 않습니다. 가능한 설명 중 하나는 Termux:Boot/runit이 Tailscale Android VPN 경로가 준비되기 전에 먼저 core SSH 연결을 시도한 부팅 순서 경쟁입니다. 다만 실제 원인은 부팅 로그, 서비스 상태, SSH 프로세스 및 localhost health를 확인하기 전까지 확정하지 않습니다.
+
+따라서 현재 판정은 다음과 같습니다.
+
+- 재부팅 직후 즉시 접속 성공은 확인되지 않음
+- 부팅 직후 일정 시간 동안 core 경로가 준비되지 않은 현상은 실제로 관찰됨
+- 이후 runit 재시도로 자동 복구됐는지는 아직 미확정
+- 구성 수정 전 INSPECT_ONLY로 부팅 로그와 현재 서비스/health 상태를 확인해야 함
+
 ## 현재 판단
 
 정적 구성 기준으로는 재부팅 자동복구 조건이 상당 부분 충족되었습니다.
@@ -59,16 +72,6 @@ Termux:Boot에는 다음 파일이 존재합니다.
 - core/notify SSH 서비스는 foreground 프로세스 종료 시 runit 재기동 대상
 - reconnect watcher는 core health 복구 감시와 메인폰 복구 알림 담당
 
-다만 실제 Android 재부팅에서 Tailscale 앱/VPN 준비 순서, Termux:Boot 실행, runit 서비스 자동 기동 및 core/notify 최종 복구가 정상인지 확인하기 전까지 재부팅 복구를 완료 판정하지 않습니다.
-
-다음 단계는 서버폰을 그대로 둔 채 메인폰만 재부팅하고, 수동 `sv up` 없이 다음을 확인하는 것입니다.
-
-1. Tailscale 연결 복구
-2. `pocketrisu-ssh-tunnel` 자동 `run`
-3. `pocketrisu-notify-tunnel` 자동 `run`
-4. `pocketrisu-notify-relay` 자동 `run`
-5. `pocketrisu-reconnect-watch` 자동 `run`
-6. 메인폰 localhost `6001/api/health` 정상
-7. 서버폰 localhost `39120/health` 및 실제 `/api/termux-notify` end-to-end 정상
+하지만 첫 실제 재부팅에서 부팅 직후 PocketRisu 접속 불가가 관찰됐으므로, 자동복구 완료 판정은 보류합니다. 다음 단계는 현재 부팅 세션의 로그와 서비스 상태를 확인해 Tailscale 준비 지연 후 runit이 실제로 core/notify를 복구했는지 판별하는 것입니다.
 
 현재 단계에서는 구성 파일을 수정하지 않았습니다.
