@@ -23,4 +23,15 @@
 
 그 뒤 서버폰을 다시 재부팅해, 서버폰 앱을 수동으로 열지 않은 상태에서 메인폰 SSH가 8022에 접속 가능한지부터 재검증합니다. 성공하면 runit/PocketRisu/local-usage bridge와 실제 PocketRisu 연결까지 이어서 확인합니다.
 
+## BootActivity 초기 활성화 실행 성공
+
+서버폰에서 `am start -n com.termux.boot/.BootActivity`를 실행했고 Android가 `Starting: Intent { cmp=com.termux.boot/.BootActivity }`로 정상 수락했습니다.
+
+- Termux:Boot launcher activity의 명시적 실행 성공
+- 공식 사용 지침의 “설치 후 launcher icon으로 한 번 실행” 조건을 이제 확실히 충족
+- 이 실행만으로 package `stopped=false`를 직접 읽은 것은 아니므로, 최종 판정은 다음 서버폰 재부팅에서 BootReceiver가 실제로 동작하는지로 확인
+- 다른 서비스/스크립트/브릿지 코드는 수정하지 않음
+
+다음 단계는 서버폰만 다시 재부팅하고, Termux/Tailscale/PocketRisu 앱을 수동으로 열지 않은 상태에서 메인폰에서 먼저 SSH 8022와 core tunnel 자동복구를 확인하는 것입니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
