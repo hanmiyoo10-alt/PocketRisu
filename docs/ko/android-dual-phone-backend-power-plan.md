@@ -95,6 +95,22 @@ PocketRisu 듀얼폰 구성은 Termux의 터미널 화면을 계속 열어 둘 �
 
 같은 검사에서 `$PREFIX/var/service`에 대해 `grep -R`을 실행한 뒤 명령이 끝나지 않는 현상이 발생했습니다. runit 서비스 트리에는 `supervise/control` 등 FIFO/특수 파일이 존재할 수 있어 재귀 grep이 해당 파일을 읽으려다 블록될 가능성이 있으므로, 이후 서비스 트리 검사는 재귀 `grep -R` 대신 `run` 등 일반 파일만 명시적으로 검사하는 방식으로 제한합니다. 이 현상은 서비스 고장으로 보지 않으며, wake lock 해제나 파일 수정도 아직 수행하지 않았습니다.
 
+`00-pocketrisu-server` 본문을 직접 확인한 결과, 3번째 줄에서 wake lock을 획득한 뒤 같은 스크립트 안에서는 `termux-wake-unlock`을 호출하지 않습니다. 이후 로직은 `start-services.sh` 로딩, 짧은 대기, `sshd` 활성화, `pocketrisu` 서비스 기동으로 구성되어 있어 wake lock 자체가 서비스 기동 명령의 필수 동작은 아닙니다. 실제 화면-off 상태에서 wake lock 없이도 서비스가 안정적으로 유지되는지는 별도 A/B 검증으로 판단합니다.
+
+## 서버폰 wake lock 변경 전 백업/기준점 — 2026-08-29
+
+wake lock 임시 해제 실험 전 `$HOME/.termux/boot/00-pocketrisu-server`를 동일 디렉터리에 타임스탬프 백업했습니다. 원본과 백업의 SHA-256은 모두 `d8a456a2bcde132acfda0f3f975de3bccb2cd1e7b21de95eba9ecb5b0e452723`으로 일치해 백업 무결성을 확인했습니다.
+
+같은 시점 기준 상태:
+
+- `pocketrisu`: `run`
+- `sshd`: `run`
+- 서버 로컬 `GET /api/health`: `ok=true`, `status=ready`
+- 부팅 스크립트 내용 자체는 아직 수정하지 않음
+- wake lock도 아직 해제하지 않음
+
+따라서 다음 단계는 파일을 수정하지 않고 런타임에서만 `termux-wake-unlock`을 적용한 뒤 화면-off 상태에서 서버 접근/health 유지 여부를 확인하는 A/B 테스트입니다. 재부팅하면 기존 부팅 스크립트가 다시 wake lock을 요청하므로 이 실험은 쉽게 원복 가능한 런타임 변경입니다.
+
 ## 메인폰 전력 기준값 INSPECT_ONLY — 2026-08-29
 
 메인폰에서 첫 전력/발열 기준값을 수집했습니다.
