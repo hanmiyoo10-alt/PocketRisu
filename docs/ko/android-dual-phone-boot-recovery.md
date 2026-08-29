@@ -156,8 +156,40 @@ Tailscale 앱을 열기 전에는 일반 인터넷은 정상인 반면 tailnet S
 
 따라서 첫 재부팅 실패와 두 번째 재부팅 성공의 차이는 `Always-on VPN` 활성화이며, 현재 장치에서는 이 설정 하나만으로 재부팅 후 Tailscale 자동 연결과 PocketRisu core 자동복구가 해결된 것으로 판정합니다. 배터리 설정은 `최적화` 상태에서도 이번 재부팅 검증을 통과했으므로, 재부팅 자동기동 해결을 위해 즉시 `제한 없음`으로 변경할 필요는 확인되지 않았습니다.
 
-## 현재 판단
+## 재부팅 후 notify 전체 체인 최종 검증 — 2026-08-29
 
-PocketRisu/Termux 쪽 부팅 자동기동과 runit 재시도 구조는 정상입니다. 첫 재부팅 실패의 직접 원인은 메인폰 Android에서 Tailscale VPN이 자동 활성화되지 않았던 것이며, `Always-on VPN` 활성화 후 두 번째 재부팅에서는 Tailscale이 자동 연결되고 PocketRisu도 정상 접속됐습니다.
+같은 두 번째 재부팅 세션에서 서버폰을 이용해 notify 자동복구도 확인했습니다.
 
-따라서 **core 기준 재부팅 자동복구는 해결 완료**로 판정합니다. 다음 남은 검증은 같은 두 번째 부팅 세션에서 notify reverse tunnel과 메인폰 Android 알림까지 재부팅 후 자동복구됐는지 확인하는 것입니다. PocketRisu/SSH 구성 자체는 추가 수정하지 않았습니다.
+- 서버폰 `GET http://127.0.0.1:39120/health` → `{ "ok": true }`
+- 서버폰 PocketRisu `POST /api/termux-notify` → `{ "ok": true }`, HTTP 200
+- 동일 요청으로 메인폰 Android에 실제 알림 표시 확인
+
+따라서 재부팅 후 다음 전체 체인이 별도 수동 Tailscale 앱 실행이나 수동 `sv up` 없이 정상 복구됐습니다.
+
+```text
+메인폰 Android Always-on VPN
+  → Tailscale 자동 연결
+  → Termux:Boot / runsvdir
+  → core SSH local tunnel 자동 복구
+  → notify SSH reverse tunnel 자동 복구
+  → 메인폰 notify relay 유지
+  → 서버폰 /api/termux-notify
+  → 메인폰 Android 알림 표시
+```
+
+서버폰은 relay 요청만 전달하며 Android 알림은 생성하지 않습니다.
+
+## 최종 판단
+
+메인폰 Android에서 Tailscale의 `Always-on VPN`을 활성화한 뒤 재부팅 자동복구 검증이 최종 통과했습니다.
+
+- Tailscale 재부팅 후 자동 연결: 성공
+- PocketRisu core 접속 자동복구: 성공
+- notify reverse tunnel 자동복구: 성공
+- 서버폰 `39120/health`: 성공
+- 서버폰 `/api/termux-notify`: HTTP 200 / `{ "ok": true }`
+- 메인폰 실제 Android 알림 표시: 성공
+- Tailscale 배터리 설정은 `최적화` 상태 그대로 검증 통과
+- `VPN 없이 연결 차단`은 꺼진 상태 유지
+
+따라서 현재 듀얼폰 Tailscale 구성은 **서로 다른 네트워크 운용 + core + notify + 재부팅 자동복구까지 end-to-end 검증 완료**로 판정합니다. PocketRisu/SSH 구성 자체에는 추가 수정이 필요하지 않았습니다.
