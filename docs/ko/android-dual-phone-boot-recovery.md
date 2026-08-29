@@ -124,7 +124,17 @@ Tailscale 앱을 열기 전에는 일반 인터넷은 정상인 반면 tailnet S
 
 따라서 첫 재부팅 자동복구 실패의 원인은 PocketRisu core, SSH runit 재시도, 일반 인터넷 문제가 아니라 **메인폰 Android에서 Tailscale이 재부팅 후 자동으로 활성화되지 않은 것**으로 사실상 확정합니다.
 
-다음 조치 후보는 Android/Tailscale의 항상 켜짐 VPN(Always-on VPN), 백그라운드 실행/배터리 제한 해제 등 재부팅 후 Tailscale VPN 자동 활성화 조건을 점검하는 것입니다. 변경 전에는 현재 설정을 먼저 INSPECT_ONLY로 확인합니다.
+## Android/Tailscale 현재 설정 확인 — 2026-08-29
+
+메인폰 Android 설정에서 Tailscale VPN/배터리 상태를 확인했습니다.
+
+- `Always-on VPN`(항상 켜진 VPN): 꺼짐
+- `VPN 없이 연결 차단`: 꺼짐
+- Tailscale 앱 배터리 설정: `최적화`
+
+이 설정은 첫 재부팅에서 Tailscale VPN이 자동 활성화되지 않은 관찰과 일치합니다. 특히 Always-on VPN이 꺼져 있으므로 Android가 재부팅 후 Tailscale VPN을 반드시 다시 올려야 하는 구성은 아니었습니다. 배터리 최적화도 백그라운드 유지 안정성에 영향을 줄 수 있습니다.
+
+다음 검증에서는 원인 분리를 위해 설정을 한 번에 여러 개 바꾸지 않습니다. 우선 `Always-on VPN`만 켜고 `VPN 없이 연결 차단`은 계속 끈 상태로 유지한 뒤 재부팅 자동복구를 다시 검증합니다. 필요할 경우 그 다음 단계에서만 Tailscale 배터리 설정을 `제한 없음`으로 변경해 추가 검증합니다.
 
 ## 현재 판단
 
