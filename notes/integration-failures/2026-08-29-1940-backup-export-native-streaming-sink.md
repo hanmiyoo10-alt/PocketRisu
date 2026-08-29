@@ -14,10 +14,21 @@ A bounded attempt to construct the feature commit through the GitHub integration
 
 This is an integration/patch-transport failure, not a code or CI failure. No test run or draft PR exists for the personal fork because there is no feature commit to test or review.
 
+## 2026-08-29 follow-up verification
+
+The remaining code-divergence uncertainty was resolved without modifying the feature branch:
+
+- personal fork `feature/backup-export-native-streaming-sink:src/ts/drive/backuplocal.ts` blob: `bccb53966862b66d3c7e643c7e3daeac2eb40e81`
+- RisuBard immediately before the native-streaming change, `rpaddict/RisuBard@9a8a02f2a0610cc58cc257de4007721c077dfed7:src/ts/drive/backuplocal.ts` blob: `bccb53966862b66d3c7e643c7e3daeac2eb40e81`
+
+The blobs are byte-identical. Therefore the verified RisuBard patch is based on exactly the same file content as the personal feature branch; there is no hidden fork-specific tail divergence to reconcile for this file. The source change remains a bounded `NO_SYSTEM_UPDATE / P0 / Evidence HIGH / Risk LOW / Dependencies NONE / READY_TO_PORT` candidate.
+
+The integration still lacks a safe patch-capable write path. Reusing the post-change source blob across repositories is rejected, and replacing a complete file by manually reconstituting connector chunks would add avoidable transcription risk. This remains a transport limitation, not a code or CI result.
+
 ## Safety response
 
-Stopped rather than replacing the complete personal-fork file from incomplete/truncated connector output or guessing at unrelated tail content. The personal branch therefore remains a clean boundary with no feature diff.
+Stopped rather than replacing the complete personal-fork file from manually reconstructed connector chunks or guessing at unrelated content. The personal branch therefore remains a clean boundary with no feature diff.
 
 ## Next step
 
-Apply the small verified patch through a write path that can safely patch the existing personal-fork file (or provide the complete current blob content to the contents API), add the focused regression test, then run focused Vitest/type checks. Only after successful verification should a personal-fork draft PR be opened.
+Apply the small verified patch through a write path that can safely patch the existing personal-fork blob (or can copy/create the exact post-change blob in the personal repository), add the focused regression test, then run focused Vitest/type checks. Only after successful verification should a personal-fork draft PR be opened.
