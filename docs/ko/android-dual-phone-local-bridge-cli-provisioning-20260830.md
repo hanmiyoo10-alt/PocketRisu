@@ -115,6 +115,20 @@ manager 소스에서 확인된 상수/동작:
 
 명령이 `set -e` 상태였기 때문에 syntax check 단계에서 즉시 종료되었고, 이후의 atomic `mv` 설치 단계는 실행되지 않았습니다. 따라서 이 시도에서는 원본 `bridge-manager.cjs`가 수정되지 않았으며 manager도 재시작되지 않았습니다. trap cleanup이 임시 파일을 제거하도록 구성되어 있어 실패는 안전하게 중단된 것으로 판정합니다.
 
-다음 시도에서는 임시 파일 이름을 `bridge-manager.tmp.<pid>.cjs`처럼 마지막 확장자가 `.cjs`가 되도록 바꾸고, 원본 SHA와 백업 SHA를 다시 확인한 뒤 동일한 최소 패치를 재검증합니다.
+## 최소 버전 패치 설치 성공
+
+두 번째 시도에서는 임시파일의 마지막 확장자를 `.cjs`로 유지한 뒤 동일한 보호 절차를 다시 수행했습니다.
+
+- 수정 직전 원본 SHA256은 PRECHECK 값과 동일
+- 기존 백업 SHA256도 동일
+- 대상 문자열 일치 수는 정확히 1개
+- 임시 패치에서 `1.14.0` 일치 0개, `1.10.0` 일치 1개
+- 임시파일 `node --check`: `OK`
+- diff는 `const MANAGED_CLI_VERSION = '1.14.0';` → `'1.10.0'` 한 줄만 변경
+- atomic install 후 설치본 `node --check`: `OK`
+- 설치본 SHA256: `fd42a554c0447375bf2c0abda3563b5f8e7ad3df8e4d6114b515540c9540af55`
+- 백업 SHA256: `35bf1562638a5cb0d25163eea1c795e8eeb1f721af2b1b6d4f15c05d15950854`
+
+이 단계에서는 **manager를 아직 재시작하지 않았습니다.** 따라서 파일 수정은 완료됐지만 현재 실행 중인 manager 프로세스는 여전히 수정 전 코드를 사용하고 있습니다. 다음 단계에서 `local-usage-runtime-manager`만 재시작한 뒤 managed CLI 상태와 engine 기능 API를 검증합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
