@@ -111,4 +111,20 @@ CLI version 1.10.0 적용 및 engine 정상화 과정에서 메인폰 PocketRisu
 
 공식 Termux:Boot 사용 지침은 설치 후 launcher icon으로 Termux:Boot 앱을 한 번 실행해야 이후 boot 시 실행될 수 있다고 명시합니다. 다만 현재 서버폰에서 그 1회 실행 조건이 충족됐는지는 아직 확인하지 않았으므로 바로 수정하지 않고 package stopped/enabled 상태와 BOOT_COMPLETED receiver 노출 상태를 먼저 점검합니다.
 
+## boot probe 추가 후 재부팅: 메인폰 정상 연결 알림 관찰
+
+Termux:Boot 실행 여부를 분리하기 위해 `00-boot-probe`를 추가하고 기존 marker를 제거한 뒤 서버폰을 다시 재부팅했습니다. 서버폰의 Termux/Termux:Boot/PocketRisu를 수동으로 열지 않은 상태에서, 사용자는 메인폰에 기존 정상복구 알림인 **“서버 연결이 정상입니다”**가 자동으로 나타난 것을 확인했습니다.
+
+이 알림은 메인폰 전용 기존 알림 경로에서 발생한 것이며 서버폰 Android 알림을 새로 만든 것이 아닙니다. 이전 두 재부팅에서는 sshd 8022가 닫혀 있어 메인 터널이 재시작 루프였으므로, 이번 알림은 최소한 서버 원격 경로가 정상 상태로 복귀했음을 강하게 시사합니다.
+
+다만 이 시점에서는 아직 다음 항목을 명령으로 재확인하지 않았으므로 **최종 PASS로 확정하지 않습니다**.
+
+- 메인 `pocketrisu-ssh-tunnel` 안정 상태
+- localhost core health HTTP 200
+- bridge engine health HTTP 200
+- 서버 `boot-probe-last` marker 생성 여부
+- 서버 runit/manager/engine live 상태
+
+또한 probe 추가가 성공의 원인이라고 단정하지 않습니다. 이번 성공이 간헐적 부팅 타이밍 차이인지, JobScheduler 실행 순서/타이밍 변화와 관련 있는지, 또는 다른 요인인지 후속 검증이 필요합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
