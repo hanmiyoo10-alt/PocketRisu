@@ -103,7 +103,14 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 메인폰 `pocketrisu-notify-relay`는 계속 `run` 상태였고 `receiver.cjs` 프로세스도 유지됨
 - 같은 시점에 core/local 터널도 `run` 상태를 유지했으며 `http://127.0.0.1:6001/api/health`가 계속 `ok=true`, `status=ready`로 응답함
 - 따라서 core/local 및 notify/reverse 두 SSH 경로의 Tailscale 전환은 모두 완료로 판정함
-- 다음 단계는 메인폰 notify relay의 입력 프로토콜과 기존 테스트 경로를 INSPECT_ONLY로 확인 → 실제 Android 알림은 메인폰에서만 검증 → 모바일망/다른 Wi-Fi에서 최종 재검증 순으로 진행함
+- 메인폰 notify relay의 `run` 스크립트는 별도 래퍼 로직 없이 Node.js의 `receiver.cjs`를 직접 실행함
+- `receiver.cjs`는 `127.0.0.1:39120`에만 listen하며 loopback 이외의 원격 주소는 403으로 거부함
+- `GET /health`는 JSON `{"ok":true}`를 반환하고, 실제 알림은 `POST /notify`에서만 생성함
+- `POST /notify`는 `x-pocketrisu-notify-token` 헤더가 메인폰의 로컬 token 파일과 일치해야 하며, 불일치 시 401로 거부함. 공개 문서에는 token 값 자체를 기록하지 않음
+- JSON body는 `stage`, `elapsedMs`, `character`, `model`, `sound`를 읽고, `stage=start`가 아니면 완료 알림으로 처리함
+- 실제 Android 알림 생성은 메인폰의 `termux-notification`을 사용하며 notification id `8472`, PocketRisu 제목/내용, high priority로 생성됨
+- 따라서 reverse SSH `39120`은 서버폰 측 loopback 요청을 메인폰의 loopback-only relay로 전달하는 역할이며, Android 알림 자체는 메인폰에서만 생성되는 구조임
+- 다음 단계는 메인폰 loopback에서 relay health 및 인증된 테스트 알림 1개를 검증 → 기존 서버 측 발신 경로를 확인해 reverse tunnel end-to-end 검증 → 모바일망/다른 Wi-Fi 최종 재검증 순으로 진행함
 
 ## Tailscale 적합성 판단
 
