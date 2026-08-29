@@ -34,4 +34,27 @@
 
 다음 단계는 서버폰만 다시 재부팅하고, Termux/Tailscale/PocketRisu 앱을 수동으로 열지 않은 상태에서 메인폰에서 먼저 SSH 8022와 core tunnel 자동복구를 확인하는 것입니다.
 
+## BootActivity 실행 후 2차 재부팅 결과
+
+BootActivity를 명시적으로 한 번 실행한 뒤 서버폰을 다시 재부팅했지만, 메인폰에서 같은 자동복구 프로브를 수행한 결과는 이전과 동일했습니다.
+
+- 메인폰 `pocketrisu-ssh-tunnel`은 age 약 1초로 계속 재시도 중
+- 서버폰 Tailscale 주소의 TCP 8022에 직접 SSH 시도 시 `Connection refused`
+- 메인 localhost core health는 HTTP `000`
+- 따라서 Tailscale 경로는 도달하지만 서버폰 sshd가 다시 자동 기동하지 않음
+- 공식 초기 활성화 조건 미충족이 단독 원인이라는 가설은 탈락
+
+이후 Samsung/Android 배터리 및 백그라운드 제한 상태를 사용자 UI에서 점검했습니다.
+
+## Samsung 배터리 제한 상태 조정
+
+사용자 확인 결과:
+
+- **Termux:Boot 배터리 설정을 `제한 없음`으로 변경함**
+- Termux:Boot는 `절전 상태 앱` 및 `초절전 상태 앱` 목록에 없음
+- Termux 본체도 `절전 상태 앱` 및 `초절전 상태 앱` 목록에 없음
+- Termux 본체 배터리 설정은 이미 `제한 없음`
+
+따라서 현재 서버폰에서는 Termux와 Termux:Boot 모두 Android/Samsung 배터리 제한의 명시적 예외 상태입니다. 다음 단계는 이 설정 변경 후 서버폰을 다시 재부팅해, 앱을 수동으로 열지 않은 상태에서 sshd 8022 및 PocketRisu 원격 경로가 자동 복구되는지 재검증하는 것입니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
