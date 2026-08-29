@@ -89,6 +89,12 @@ PocketRisu 듀얼폰 구성은 Termux의 터미널 화면을 계속 열어 둘 �
 
 또한 사용자 확인으로 **메인폰과 서버폰 모두 현재 Termux wake lock이 유지 중**인 상태입니다. 양쪽 모두 순간 CPU가 거의 idle인데도 wake lock이 상시 유지된다면 화면-off deep sleep을 제한해 대기 배터리와 발열에 영향을 줄 수 있으므로, 현재 전력 최적화의 우선 조사 항목을 dual-phone wake lock으로 올립니다. 단, 서비스 안정성을 깨지 않도록 즉시 영구 제거하지 않고 먼저 wake lock 요청 위치를 확인한 뒤 한 폰씩 임시 해제 A/B 검증을 수행합니다.
 
+## 서버폰 wake lock 출처 확인 — 2026-08-29
+
+서버폰에서 wake lock 요청 위치를 INSPECT_ONLY로 확인한 결과, `$HOME/.termux/boot/00-pocketrisu-server`의 3번째 줄에서 `termux-wake-lock`을 호출하는 것이 확인됐습니다. 따라서 서버폰 wake lock의 부팅 시 요청 위치는 이 파일로 확정합니다.
+
+같은 검사에서 `$PREFIX/var/service`에 대해 `grep -R`을 실행한 뒤 명령이 끝나지 않는 현상이 발생했습니다. runit 서비스 트리에는 `supervise/control` 등 FIFO/특수 파일이 존재할 수 있어 재귀 grep이 해당 파일을 읽으려다 블록될 가능성이 있으므로, 이후 서비스 트리 검사는 재귀 `grep -R` 대신 `run` 등 일반 파일만 명시적으로 검사하는 방식으로 제한합니다. 이 현상은 서비스 고장으로 보지 않으며, wake lock 해제나 파일 수정도 아직 수행하지 않았습니다.
+
 ## 메인폰 전력 기준값 INSPECT_ONLY — 2026-08-29
 
 메인폰에서 첫 전력/발열 기준값을 수집했습니다.
