@@ -132,4 +132,27 @@ PRECHECK 뒤 `bridge-manager.cjs`만 백업한 후 최소 영구화 패치를 �
 
 이 검증은 full PocketRisu 서비스, sshd, generic bridge, main-phone tunnel/notification 경로를 건드리지 않습니다. 실행 전 run 파일 별도 백업과 현재 manager/engine PID, live API 정상 상태를 확인하고, 예상과 다른 응답이 나오면 다른 서비스로 확대하지 않고 중단합니다.
 
+## 실제 run 파일 재생성 검증 성공
+
+영구화된 manager가 실제 `writeEngineService()` 경로에서 run 파일을 스스로 재생성하는지 확인하기 위해, run 파일에서 `LLMGATEWAY_CLI_VERSION=1.10.0` 한 줄만 일시적으로 제거한 뒤 인증된 `/engine/sync`를 호출했습니다.
+
+- 테스트 직전 run 파일 SHA256: `617f2e4f7f1945c317f3c173fa233ae70c76a8b6f3002906b767384fcbcd4f6a`
+- 별도 백업 생성 후 SHA256 동일 확인
+- 제거 diff는 `LLMGATEWAY_CLI_VERSION=1.10.0` 한 줄만 삭제
+- 일시적 상태에서 manager `/status`는 HTTP 200, `engineManaged=true`, `engineBundled=false`, `engineServiceEnvironmentReady=false`, CLI runtime은 계속 `ready/1.10.0`
+- 따라서 의도한 controlled degraded metadata 상태가 정확히 만들어짐
+- `/engine/sync` 응답: HTTP 200, `ok=true`, `synced=true`, `state=bundled`, `engineManaged=true`, `engineBundled=true`, engine version 1.6.27
+- sync 뒤 run 파일은 `DEVPASS_BRIDGE_MANAGED_CLI=1`과 `LLMGATEWAY_CLI_VERSION=1.10.0` 두 줄을 모두 다시 포함
+- 재생성된 run 파일 SHA256은 테스트 전 정상 값과 동일한 `617f2e4f7f1945c317f3c173fa233ae70c76a8b6f3002906b767384fcbcd4f6a`
+- manager PID는 테스트 전후 동일하게 유지됨
+- engine PID는 새 프로세스로 정상 교체됨
+- 새 engine `/proc/<pid>/environ`에서 `DEVPASS_BRIDGE_MANAGED_CLI=1`, `LLMGATEWAY_CLI_VERSION=1.10.0` 모두 확인
+- 최종 manager `/status`: HTTP 200, `cliRuntimeState=ready`, `cliRuntimeVersion=1.10.0`, `cliRuntimeProvisioning=ok`, `engineManaged=true`, `engineBundled=true`, `engineServiceEnvironmentReady=true`
+- 최종 `/devpass-status`, `/orgs`, `/v1/summary` 모두 HTTP 200
+- 최종 engine `/health`: `healthy`, `circuits.open=0`
+
+이 결과로 manager의 영구화 패치는 **실제 run-file 재생성 경로까지 검증 완료**입니다. 이후 manager가 engine service 파일을 다시 작성하더라도 `MANAGED_CLI_VERSION=1.10.0`과 동일한 값을 `LLMGATEWAY_CLI_VERSION`으로 자동 주입하며, 새 engine 프로세스가 그 값을 실제 환경으로 받아 live API가 정상 동작합니다. bundled engine 파일 자체는 수정하지 않았습니다.
+
+다음 단계는 브릿지 자체 코드 수정이 아니라 실제 PocketRisu/프론트엔드에서 local-usage/DevPass 플러그인이 정상 값을 읽는지 사용자 관점 기능 검증을 하고, 그 뒤 서버폰 재부팅 후 manager/engine/generic bridge와 실제 플러그인 자동복구를 검증하는 것입니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
