@@ -89,7 +89,12 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 수정 후 기존 LAN 목적지는 0회, Tailscale 목적지는 정확히 1회로 확인되어 파일 수정이 의도대로 끝남
 - 이 단계에서는 `pocketrisu-ssh-tunnel` 서비스를 재시작하지 않았으므로 실행 중인 기존 세션은 아직 영향을 받지 않았음
 - `pocketrisu-notify-tunnel`은 이 단계에서 수정하거나 재시작하지 않고 기존 LAN 경로를 유지함
-- 다음 전환 단계는 `pocketrisu-ssh-tunnel`만 재시작 → 실제 SSH 프로세스의 Tailscale 목적지 확인 → local forward 및 `http://127.0.0.1:6001/api/health` 검증 → 성공 후에만 notify/reverse 터널 전환 순으로 진행함
+- 이후 `pocketrisu-ssh-tunnel`만 재시작했고 runit 재시작은 종료코드 0으로 성공함
+- 재시작 후 실제 core SSH 프로세스가 Tailscale 목적지를 사용하며 local forward `6001`, `39117`, `39118`, `39119`를 그대로 유지하는 것을 확인함
+- 같은 시점에 notify/reverse SSH 프로세스는 기존 LAN 목적지를 계속 사용하고 있어 단계적 전환 범위가 core에만 제한된 것도 확인함
+- 메인폰의 `http://127.0.0.1:6001/api/health`가 `ok=true`, `status=ready`로 응답해 PocketRisu core/local 터널이 Tailscale 경로에서 정상 동작함을 검증함
+- 따라서 core/local 터널의 Tailscale 전환은 완료로 판정함
+- 다음 전환 단계는 `pocketrisu-notify-tunnel`만 별도 백업/수정 → reverse `39120` 프로세스의 Tailscale 목적지 전환 → 메인폰 notify relay 검증 → 최종 외부망 재검증 순으로 진행함
 
 ## Tailscale 적합성 판단
 
@@ -105,7 +110,7 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 모바일 데이터 검증에서도 동일한 SSH host key 세트가 다시 확인되어 외부망 운용에 필요한 핵심 경로가 동작하는 것으로 판단함(테스트 당시 Wi-Fi off 조건 전제)
 - `StrictHostKeyChecking=yes`를 유지하기 위한 Tailscale 주소 host key 등록도 완료되어 서비스 전환 준비가 됨
 - `BatchMode=yes` + `StrictHostKeyChecking=yes` 직접 SSH 인증도 Tailscale 경로에서 성공해 기존 인증 체계를 그대로 유지할 수 있음이 확인됨
-- core/local 터널의 설정 파일은 Tailscale 목적지로 단계적으로 치환되었으며, 실제 실행 전환은 서비스 재시작 및 health 검증 단계로 분리해 진행 중임
+- core/local 터널은 실제 runit 재시작 후 Tailscale 목적지로 실행 전환되었고, `/api/health`까지 정상이라 core 전환은 완료됨
 - 목적은 기존 core/notify/relay 기능을 대체하는 것이 아니라, 그 아래의 메인폰↔서버폰 네트워크 경로를 고정·암호화하는 것이다.
 - 서버폰을 exit node나 subnet router로 쓰는 것은 현재 목표에 필요하지 않으므로 우선 제외한다.
 
