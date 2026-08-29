@@ -73,8 +73,9 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 메인폰에서 기존 LAN 경로와 Tailscale 경로 각각으로 서버폰 TCP 8022의 SSH host key를 `ssh-keyscan`으로 읽기 전용 조회함
 - ECDSA, RSA, ED25519 세 host key fingerprint가 두 경로에서 모두 일치함
 - 따라서 Tailscale 경로의 TCP 8022가 기존 LAN 경로와 동일한 서버폰의 Termux sshd에 도달하는 것이 검증됨
-- 다음 검증은 메인폰 Wi‑Fi를 끄고 모바일 데이터에서 같은 Tailscale 경로로 다시 host key를 조회하는 단계임
-- 모바일 데이터 검증까지 성공하면 runit 파일 백업 → 서버 목적지 치환 → 서비스별 검증 순으로 전환함
+- 이후 메인폰에서 모바일 데이터 경로 검증용 `ssh-keyscan`을 실행했고, Tailscale 경로에서 동일한 RSA/ECDSA/ED25519 세 fingerprint가 다시 확인됨
+- 단, 터미널 출력 자체만으로 Wi-Fi 비활성 상태를 독립적으로 증명할 수는 없으므로 외부망 최종 판정은 테스트 당시 메인폰 Wi-Fi가 실제로 꺼져 있었다는 조건과 함께 기록함
+- 다음 전환 단계는 현재 runit 설정 백업 → 서버 목적지 주소 치환 → core/local forward 검증 → notify/reverse 검증 → Wi-Fi/모바일망 재검증 순으로 진행함
 
 ## Tailscale 적합성 판단
 
@@ -87,6 +88,7 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 메인폰의 Android VPN 설정 UI 확인 결과 기존 별도 활성 VPN이 없어 Tailscale과의 VPN 슬롯 충돌 가능성도 낮다.
 - 두 기기가 실제로 같은 tailnet에 온라인 상태로 들어온 것이 확인되어 네트워크 오버레이 도입 자체는 성공함
 - LAN 경로와 Tailscale 경로의 SSH host key가 모두 일치해 Tailscale이 동일한 서버폰 sshd까지 도달하는 것도 검증됨
+- 모바일 데이터 검증에서도 동일한 SSH host key 세트가 다시 확인되어 외부망 운용에 필요한 핵심 경로가 동작하는 것으로 판단함(테스트 당시 Wi-Fi off 조건 전제)
 - 목적은 기존 core/notify/relay 기능을 대체하는 것이 아니라, 그 아래의 메인폰↔서버폰 네트워크 경로를 고정·암호화하는 것이다.
 - 서버폰을 exit node나 subnet router로 쓰는 것은 현재 목표에 필요하지 않으므로 우선 제외한다.
 
