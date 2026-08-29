@@ -46,10 +46,14 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
   - `00-update-local-stack`
   - `05-pocketrisu-boot-trace`
   - `20-pocketrisu-ssh-tunnel`
+- `20-pocketrisu-ssh-tunnel`은 runsvdir 준비를 보장한 뒤 `sv up pocketrisu-ssh-tunnel`을 실행하고, `http://127.0.0.1:6001/api/health`를 최대 약 90초 동안 확인하는 부트 복구 스크립트임
+- runit 서비스의 실제 `run` 파일에 서버 LAN 목적지 `u0_a34@192.168.0.19`가 직접 하드코딩되어 있음
+- 해당 run 파일은 local forward `6001`, `39117`, `39118`, `39119`를 담당함
+- `192.168.0.19` 검색에서 migration backup 파일들과 과거 상태 로그도 함께 발견됨. 이들 백업/로그는 현재 실행 구성 파일과 구분해서 다뤄야 함
+- `.local/state/pocketrisu-ssh-tunnel/current`의 `Connection refused` 다수는 2026-08-27 기록으로, 현재 시점의 장애를 의미하지 않음
+- 출력량이 커져 `REVERSE 39120 OWNER` 및 `TAILSCALE APP PROCESS` 섹션 결과가 이번 캡처에 포함되지 않았으므로 별도 짧은 INSPECT_ONLY가 필요
 - 현재 구조는 LAN 주소 `192.168.0.19`에 직접 의존하므로 서로 다른 네트워크로 분리되면 그대로는 접속할 수 없음
 - Tailscale 도입 시 core/notify 포워딩 구조 자체를 바꾸기보다 서버 목적지 주소만 Tailscale 주소 또는 MagicDNS 이름으로 치환하는 방향이 가장 단순함
-- 아직 `20-pocketrisu-ssh-tunnel` 및 runit 서비스의 실제 스크립트 본문은 수정 전 INSPECT_ONLY로 추가 확인 필요
-- Tailscale Android 앱이 현재 로그인/연결 활성 상태인지도 별도 확인 필요
 
 ## Tailscale 적합성 판단
 
