@@ -56,13 +56,22 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - `192.168.0.19` 검색에서 migration backup 파일들과 과거 상태 로그도 함께 발견됨. 이들 백업/로그는 현재 실행 구성 파일과 구분해서 다뤄야 함
 - `.local/state/pocketrisu-ssh-tunnel/current`의 `Connection refused` 다수는 2026-08-27 기록으로, 현재 시점의 장애를 의미하지 않음
 - `pidof com.tailscale.ipn` 및 `ps -A | grep -i tailscale`에서는 현재 Tailscale 프로세스가 보이지 않음
-- 이는 Tailscale Android 패키지가 설치되어 있으나 현재 앱/VPN 프로세스가 활성 상태로 보이지 않는다는 뜻이며, 로그인 상태 자체까지 단정할 수는 없음
+- 이는 Tailscale Android 패키지가 설치되어 있으나 당시 앱/VPN 프로세스가 활성 상태로 보이지 않는다는 뜻이며, 로그인 상태 자체까지 단정할 수는 없음
 - Android 16 Termux에서 `settings get secure always_on_vpn_app` 및 `always_on_vpn_lockdown` 조회는 `Failed transaction (2147483646)`으로 실패함
 - `dumpsys package com.tailscale.ipn` 필터와 `dumpsys connectivity` VPN 필터도 유효 출력을 얻지 못함
 - 따라서 Termux 권한만으로 현재 always-on VPN/활성 VPN 여부를 확정하지 않으며, 이 빈 출력은 "VPN 없음"의 증거로 사용하지 않음
-- 메인폰 Android VPN 설정 화면을 사용자가 직접 확인했으며, 현재 별도 VPN이 연결되어 있지 않음을 확인함. 따라서 Tailscale 도입의 가장 큰 충돌 변수였던 기존 활성 VPN은 현재 없음으로 판단함
+- 메인폰 Android VPN 설정 화면을 사용자가 직접 확인했으며, 당시 별도 VPN이 연결되어 있지 않음을 확인함. 따라서 Tailscale 도입의 가장 큰 충돌 변수였던 기존 활성 VPN은 없음으로 판단함
 - 현재 구조는 LAN 주소 `192.168.0.19`에 직접 의존하므로 서로 다른 네트워크로 분리되면 그대로는 접속할 수 없음
 - Tailscale 도입 시 core/notify 포워딩 구조 자체를 바꾸기보다 각 터널 서비스의 서버 목적지 주소만 Tailscale 주소 또는 MagicDNS 이름으로 치환하는 방향이 가장 단순함
+
+## 2026-08-29 Tailscale 연결 확인
+
+- Android Tailscale 앱 화면에서 두 기기가 모두 같은 tailnet에 온라인(초록 상태)으로 표시됨
+- 기기명은 `s21-ultra`, `s25-ultra`로 확인됨
+- Exit Node는 `None` 상태로, 현재 목적에 맞게 일반 tailnet 연결만 사용 중임
+- 공개 저장소에는 계정 식별 정보와 정확한 Tailscale 100.x 주소를 기록하지 않음
+- 다음 검증은 메인폰에서 서버폰의 Tailscale 주소 TCP 8022에 SSH host key를 읽기 전용으로 조회하고, 기존 LAN 경로의 host key와 동일한지 비교하는 단계임
+- 이 검증이 성공하면 메인폰 Wi‑Fi를 끄고 모바일 데이터에서 같은 Tailscale 경로로 다시 검증한 뒤, runit 파일 백업 → 서버 목적지 치환 → 서비스별 검증 순으로 전환함
 
 ## Tailscale 적합성 판단
 
@@ -70,9 +79,10 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 
 - 서버폰 sshd가 `0.0.0.0:8022` 및 `[::]:8022`에 바인딩되어 있어 Tailscale 가상 인터페이스가 추가되어도 별도 SSH 바인딩 변경 없이 접근 가능할 가능성이 높다.
 - 기존 LAN 주소 `192.168.0.19`에 의존하는 접속을 Tailscale의 고정 사설 주소 또는 MagicDNS 이름으로 치환하면 서로 다른 Wi‑Fi/모바일망에서도 같은 SSH 구조를 유지하기 쉽다.
-- 메인폰에는 이미 Tailscale Android 앱 패키지가 설치되어 있어 메인폰 측 설치 단계는 줄어들 수 있다.
+- 메인폰에는 이미 Tailscale Android 앱 패키지가 설치되어 있어 메인폰 측 설치 단계는 줄어든 상태다.
 - core/local forward와 notify/reverse tunnel이 서로 다른 runit 서비스로 분리되어 있어, Tailscale 전환 시 서비스별 백업·검증·롤백이 가능하다.
-- 메인폰의 Android VPN 설정 UI 확인 결과 현재 별도 활성 VPN이 없어 Tailscale과의 VPN 슬롯 충돌 가능성도 낮다.
+- 메인폰의 Android VPN 설정 UI 확인 결과 기존 별도 활성 VPN이 없어 Tailscale과의 VPN 슬롯 충돌 가능성도 낮다.
+- 두 기기가 실제로 같은 tailnet에 온라인 상태로 들어온 것이 확인되어 네트워크 오버레이 도입 자체는 성공함
 - 목적은 기존 core/notify/relay 기능을 대체하는 것이 아니라, 그 아래의 메인폰↔서버폰 네트워크 경로를 고정·암호화하는 것이다.
 - 서버폰을 exit node나 subnet router로 쓰는 것은 현재 목표에 필요하지 않으므로 우선 제외한다.
 
