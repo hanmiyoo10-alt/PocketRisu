@@ -61,4 +61,25 @@ CLI version 1.10.0 적용 및 engine 정상화 과정에서 메인폰 PocketRisu
 
 따라서 현재 실패층은 PocketRisu frontend나 local-usage API가 아니라 **메인폰에서 서버폰으로 SSH tunnel을 세우는 단계**입니다. 다만 이 결과만으로는 서버폰 Tailscale 미연결과 서버 sshd 미기동을 구분할 수 없습니다. 다음 단계는 서버폰 앱을 수동으로 열지 않은 채 메인폰에서 tunnel과 동일한 대상에 1회성 SSH verbose 연결을 시도해 `timeout/no route`와 `connection refused/auth success`를 구분하는 것입니다.
 
+## 1회성 SSH 진단: Tailscale 경로 도달, sshd 미기동
+
+메인폰에서 tunnel run 파일의 실제 대상과 포트(8022)를 파싱한 뒤, 포워딩 없이 `ssh -vvv` 1회성 연결을 실행했습니다.
+
+- 대상 및 포트 파싱 성공
+- SSH 종료코드 255
+- 네트워크 오류는 `Connection refused`
+- `Connection timed out`, `No route to host`, `Network is unreachable`은 나오지 않음
+
+`Connection refused`는 서버폰의 Tailscale 주소까지 패킷이 도달해 원격 측에서 해당 TCP 포트가 닫혀 있음을 의미합니다. 따라서 이번 재부팅에서 서버폰 Tailscale은 자동 연결된 것으로 판단할 수 있고, 실패 지점은 **서버폰의 Termux/sshd 자동 기동**으로 좁혀집니다.
+
+현재 결론:
+
+- 서버폰 Tailscale 재부팅 자동 연결: 통과로 판단
+- 서버폰 sshd 8022 자동 기동: 실패
+- 메인폰 tunnel 재시작 루프: 서버 sshd 부재의 결과
+- PocketRisu 원격 자동복구: sshd 단계에서 차단되어 실패
+- 서버폰 앱은 이 결론이 확정될 때까지 수동으로 열지 않아 uncontaminated reboot 상태를 보존함
+
+다음 단계부터는 자동복구 테스트 자체는 실패로 확정하고, 서버폰 Termux를 수동으로 열어 **무엇이 자동 실행되지 않았는지 INSPECT_ONLY**로 확인합니다. 이 수동 실행 이후 상태는 재부팅 자동복구 증거로 사용하지 않습니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
