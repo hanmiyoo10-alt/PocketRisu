@@ -48,12 +48,15 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
   - `20-pocketrisu-ssh-tunnel`
 - `20-pocketrisu-ssh-tunnel`은 runsvdir 준비를 보장한 뒤 `sv up pocketrisu-ssh-tunnel`을 실행하고, `http://127.0.0.1:6001/api/health`를 최대 약 90초 동안 확인하는 부트 복구 스크립트임
 - runit 서비스의 실제 `run` 파일에 서버 LAN 목적지 `u0_a34@192.168.0.19`가 직접 하드코딩되어 있음
-- 해당 run 파일은 local forward `6001`, `39117`, `39118`, `39119`를 담당함
+- `pocketrisu-ssh-tunnel`은 local forward `6001`, `39117`, `39118`, `39119`를 담당함
+- reverse `39120` 프로세스는 부모 PID가 `runsv pocketrisu-notify-tunnel`이며, 별도 runit 서비스 `pocketrisu-notify-tunnel`이 담당하는 것으로 확정됨
+- 즉 core/local forward 터널과 notify/reverse 터널은 runit 서비스 단위로 분리되어 있음
+- `pocketrisu-notify-relay`는 별도 runit 서비스로 `receiver.cjs`를 실행 중이며, notify tunnel과 relay도 분리되어 있음
 - `192.168.0.19` 검색에서 migration backup 파일들과 과거 상태 로그도 함께 발견됨. 이들 백업/로그는 현재 실행 구성 파일과 구분해서 다뤄야 함
 - `.local/state/pocketrisu-ssh-tunnel/current`의 `Connection refused` 다수는 2026-08-27 기록으로, 현재 시점의 장애를 의미하지 않음
-- 출력량이 커져 `REVERSE 39120 OWNER` 및 `TAILSCALE APP PROCESS` 섹션 결과가 이번 캡처에 포함되지 않았으므로 별도 짧은 INSPECT_ONLY가 필요
 - 현재 구조는 LAN 주소 `192.168.0.19`에 직접 의존하므로 서로 다른 네트워크로 분리되면 그대로는 접속할 수 없음
-- Tailscale 도입 시 core/notify 포워딩 구조 자체를 바꾸기보다 서버 목적지 주소만 Tailscale 주소 또는 MagicDNS 이름으로 치환하는 방향이 가장 단순함
+- Tailscale 도입 시 core/notify 포워딩 구조 자체를 바꾸기보다 각 터널 서비스의 서버 목적지 주소만 Tailscale 주소 또는 MagicDNS 이름으로 치환하는 방향이 가장 단순함
+- Tailscale Android 앱의 현재 실행/연결 활성 상태는 아직 별도 확인 필요
 
 ## Tailscale 적합성 판단
 
@@ -62,6 +65,7 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 서버폰 sshd가 `0.0.0.0:8022` 및 `[::]:8022`에 바인딩되어 있어 Tailscale 가상 인터페이스가 추가되어도 별도 SSH 바인딩 변경 없이 접근 가능할 가능성이 높다.
 - 기존 LAN 주소 `192.168.0.19`에 의존하는 접속을 Tailscale의 고정 사설 주소 또는 MagicDNS 이름으로 치환하면 서로 다른 Wi‑Fi/모바일망에서도 같은 SSH 구조를 유지하기 쉽다.
 - 메인폰에는 이미 Tailscale Android 앱 패키지가 설치되어 있어 메인폰 측 설치 단계는 줄어들 수 있다.
+- core/local forward와 notify/reverse tunnel이 서로 다른 runit 서비스로 분리되어 있어, Tailscale 전환 시 서비스별 백업·검증·롤백이 가능하다.
 - Android에서는 동시에 활성화 가능한 VPN이 하나뿐이므로, 메인폰/서버폰에서 다른 VPN을 사용 중인지가 가장 큰 도입 체크포인트다.
 - 목적은 기존 core/notify/relay 기능을 대체하는 것이 아니라, 그 아래의 메인폰↔서버폰 네트워크 경로를 고정·암호화하는 것이다.
 - 서버폰을 exit node나 subnet router로 쓰는 것은 현재 목표에 필요하지 않으므로 우선 제외한다.
