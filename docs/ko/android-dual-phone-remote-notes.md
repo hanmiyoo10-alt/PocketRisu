@@ -75,7 +75,8 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 따라서 Tailscale 경로의 TCP 8022가 기존 LAN 경로와 동일한 서버폰의 Termux sshd에 도달하는 것이 검증됨
 - 이후 메인폰에서 모바일 데이터 경로 검증용 `ssh-keyscan`을 실행했고, Tailscale 경로에서 동일한 RSA/ECDSA/ED25519 세 fingerprint가 다시 확인됨
 - 단, 터미널 출력 자체만으로 Wi-Fi 비활성 상태를 독립적으로 증명할 수는 없으므로 외부망 최종 판정은 테스트 당시 메인폰 Wi-Fi가 실제로 꺼져 있었다는 조건과 함께 기록함
-- 다음 전환 단계는 현재 runit 설정 백업 → 서버 목적지 주소 치환 → core/local forward 검증 → notify/reverse 검증 → Wi-Fi/모바일망 재검증 순으로 진행함
+- 전환 직전 `pocketrisu-ssh-tunnel/run`과 `pocketrisu-notify-tunnel/run`을 `migration-backups` 아래에 같은 타임스탬프로 백업했으며, 두 백업 파일 생성 및 원본과 동일한 실행 권한을 확인함
+- 다음 전환 단계는 Tailscale 주소의 SSH host key가 `known_hosts`에 등록되어 있는지 확인 → 서버 목적지 주소 치환 → core/local forward 검증 → notify/reverse 검증 → Wi-Fi/모바일망 재검증 순으로 진행함
 
 ## Tailscale 적합성 판단
 
