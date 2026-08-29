@@ -119,6 +119,17 @@ PRECHECK 뒤 `bridge-manager.cjs`만 백업한 후 최소 영구화 패치를 �
 
 따라서 새 manager 코드는 정상 기동하며 기존 정상 engine을 불필요하게 재시작하지 않고, 강화된 environment-ready 검사에서도 현재 run 파일을 정상으로 인정합니다. live API와 circuit 상태에도 회귀가 없습니다.
 
-아직 남은 검증은 **manager가 실제로 `writeEngineService()`를 호출해 run 파일을 새로 생성하는 경로에서도 `LLMGATEWAY_CLI_VERSION=1.10.0`을 스스로 작성하는지**입니다. 이 검증 전에는 어떤 manager endpoint가 가장 좁은 범위로 run 파일 재생성을 유발하는지 소스에서 먼저 확인하고, full PocketRisu 서비스나 다른 브릿지는 건드리지 않습니다.
+## 실제 run 파일 재생성 경로 확인
+
+추가 INSPECT_ONLY에서 `writeEngineService()`의 실제 호출 경로를 확인했습니다.
+
+- 직접 호출은 `startManagedCandidate()`와 `adoptEngine()` 두 경로뿐
+- `/engine/adopt`는 현재 `engineManaged=true`이면 `current` 상태로 즉시 반환하므로 현재 정상 상태에서는 run 파일을 재생성하지 않음
+- `/engine/sync`는 `syncBundledEngine()`을 호출하지만, 현재 `engineBundled=true`이고 bundled engine version도 현재 버전이면 `current` 상태로 즉시 반환하므로 역시 run 파일을 재생성하지 않음
+- 실제 bundle sync 경로에 들어가면 `sv down`으로 local-usage engine 하나를 내린 뒤 `startManagedCandidate()`를 호출하고, 이 함수가 `writeEngineService(candidate, false)`로 run 파일을 새로 작성한 다음 engine을 다시 올림
+
+따라서 현재 정상 상태에서 단순히 `/engine/sync`를 호출하는 것만으로는 영구화 생성 로직을 검증할 수 없습니다. 가장 좁은 실제 재생성 검증 방법은 현재 run 파일에서 `LLMGATEWAY_CLI_VERSION=1.10.0` 한 줄만 일시적으로 제거해 `engineServiceEnvironmentReady=false` 및 `engineBundled=false`를 만들고, 인증된 `/engine/sync`를 한 번 호출하는 것입니다. 실행 중 engine 프로세스는 기존 env를 메모리에 유지하므로 sync 호출 전까지 live 기능은 유지됩니다. sync가 정상 경로로 들어가면 local-usage engine 하나만 재시작되고, 새 manager의 `writeEngineService()`가 두 env가 들어간 run 파일을 스스로 재생성해야 합니다.
+
+이 검증은 full PocketRisu 서비스, sshd, generic bridge, main-phone tunnel/notification 경로를 건드리지 않습니다. 실행 전 run 파일 별도 백업과 현재 manager/engine PID, live API 정상 상태를 확인하고, 예상과 다른 응답이 나오면 다른 서비스로 확대하지 않고 중단합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
