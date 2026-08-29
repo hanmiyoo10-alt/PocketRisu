@@ -76,13 +76,13 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 이후 메인폰에서 모바일 데이터 경로 검증용 `ssh-keyscan`을 실행했고, Tailscale 경로에서 동일한 RSA/ECDSA/ED25519 세 fingerprint가 다시 확인됨
 - 단, 터미널 출력 자체만으로 Wi-Fi 비활성 상태를 독립적으로 증명할 수는 없으므로 외부망 최종 판정은 테스트 당시 메인폰 Wi-Fi가 실제로 꺼져 있었다는 조건과 함께 기록함
 - 전환 직전 `pocketrisu-ssh-tunnel/run`과 `pocketrisu-notify-tunnel/run`을 `migration-backups` 아래에 같은 타임스탬프로 백업했으며, 두 백업 파일 생성 및 원본과 동일한 실행 권한을 확인함
-- `~/.ssh/known_hosts`에는 기존 LAN 주소의 TCP 8022 host key(ED25519/RSA/ECDSA)가 등록되어 있으나, Tailscale 주소의 TCP 8022 항목은 아직 등록되어 있지 않음을 확인함
-- 두 터널 모두 `StrictHostKeyChecking=yes`를 사용하므로 목적지 주소를 Tailscale로 치환하기 전에, 이미 fingerprint 일치가 검증된 Tailscale 주소 host key를 `known_hosts`에 안전하게 추가해야 함
-- `known_hosts` 추가 직전 원본을 `migration-backups/known_hosts.bak-tailscale-*`로 백업했고 파일 생성도 확인함
-- host key 재수집/비교/추가를 한 번에 수행하려던 스크립트는 `set -e` 상태에서 `ssh-keyscan` 단계 직후 종료되어 실제 추가 단계까지 도달하지 않음. 따라서 `known_hosts`는 아직 수정되지 않았음
-- 이후 `ssh-keyscan`을 별도 진단으로 재실행한 결과 종료코드 `0`, stderr 없음, 유효 키 수집 성공을 확인했고 RSA/ECDSA/ED25519 fingerprint도 기존 검증값과 일치함
-- 따라서 이전 중단은 Tailscale SSH 경로 자체의 장애로 보지 않으며, 다음 단계에서 새 백업을 만든 뒤 검증된 Tailscale host key만 `known_hosts`에 추가하고 재확인할 예정임
-- 다음 전환 단계는 검증된 Tailscale host key 추가 및 재확인 → 서버 목적지 주소 치환 → core/local forward 검증 → notify/reverse 검증 → Wi-Fi/모바일망 재검증 순으로 진행함
+- `~/.ssh/known_hosts`에는 기존 LAN 주소의 TCP 8022 host key(ED25519/RSA/ECDSA)가 등록되어 있으나, Tailscale 주소의 TCP 8022 항목은 처음에는 등록되어 있지 않았음
+- 두 터널 모두 `StrictHostKeyChecking=yes`를 사용하므로 목적지 주소를 Tailscale로 치환하기 전에 host key 등록이 필요함
+- `known_hosts` 원본은 `migration-backups/known_hosts.bak-tailscale-*`로 백업 완료
+- 별도 `ssh-keyscan` 진단에서 종료코드 `0`, stderr 없음, RSA/ECDSA/ED25519 세 fingerprint가 기존 검증값과 일치함을 재확인함
+- 이후 기존 LAN `known_hosts`의 신뢰된 세 host key를 Tailscale 주소 항목으로 복제했고, `prepared_key_lines=3` 확인 후 ED25519/RSA/ECDSA 세 항목이 실제 `known_hosts`에 등록된 것을 검증함
+- 따라서 `StrictHostKeyChecking=yes`를 유지한 채 Tailscale 주소로 SSH 접속할 준비가 완료됨
+- 다음 전환 단계는 Tailscale 주소로 실제 BatchMode SSH 인증 확인 → `pocketrisu-ssh-tunnel` 서버 목적지 주소 치환 → core/local forward 검증 → `pocketrisu-notify-tunnel` 치환 및 reverse 검증 → Wi-Fi/모바일망 재검증 순으로 진행함
 
 ## Tailscale 적합성 판단
 
@@ -96,6 +96,7 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 두 기기가 실제로 같은 tailnet에 온라인 상태로 들어온 것이 확인되어 네트워크 오버레이 도입 자체는 성공함
 - LAN 경로와 Tailscale 경로의 SSH host key가 모두 일치해 Tailscale이 동일한 서버폰 sshd까지 도달하는 것도 검증됨
 - 모바일 데이터 검증에서도 동일한 SSH host key 세트가 다시 확인되어 외부망 운용에 필요한 핵심 경로가 동작하는 것으로 판단함(테스트 당시 Wi-Fi off 조건 전제)
+- `StrictHostKeyChecking=yes`를 유지하기 위한 Tailscale 주소 host key 등록도 완료되어 서비스 전환 준비가 됨
 - 목적은 기존 core/notify/relay 기능을 대체하는 것이 아니라, 그 아래의 메인폰↔서버폰 네트워크 경로를 고정·암호화하는 것이다.
 - 서버폰을 exit node나 subnet router로 쓰는 것은 현재 목표에 필요하지 않으므로 우선 제외한다.
 
