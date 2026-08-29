@@ -44,14 +44,39 @@ manager 소스에서 확인된 상수/동작:
 
 현재 GitHub HTTPS 접근은 HTTP 200으로 정상 확인되어, 점검 시점의 일반 네트워크 연결 자체는 정상입니다. 다만 최초 provisioning 실패 시점의 직접 원인이 네트워크였는지는 아직 확정하지 않습니다.
 
+## provisioning 함수와 실제 CLI 디렉터리 추가 확인
+
+추가 INSPECT_ONLY에서 `provisionManagedCli()` 본문과 현재 CLI 디렉터리 트리를 확인했습니다.
+
+확인된 provisioning 동작:
+
+- 요구 버전 디렉터리 검증에 성공하면 descriptor/state를 `ready`로 갱신하고 종료
+- 요구 버전이 없거나 검증 실패하면 이전 `nextRetryAt`을 확인
+- backoff가 끝났으면 임시 stage 디렉터리를 만들고 `npm install --ignore-scripts --no-audit --no-fund --package-lock=true` 실행
+- 설치 성공 후 stage를 요구 버전 디렉터리로 승격하고 descriptor/state를 갱신
+- 실패 시 stage를 제거하고 기존 버전 디렉터리가 격리되었다면 복원한 뒤 `unavailable/backoff`를 기록
+
+현재 실제 디스크에는 다음 CLI 버전 디렉터리만 존재합니다.
+
+- `1.9.0`
+- `1.10.0`
+
+두 디렉터리 모두 실제 `@llmgateway/cli` package가 설치되어 있고 package metadata의 버전도 각각 1.9.0, 1.10.0으로 일치합니다. 반면 manager가 요구하는 `1.14.0` 디렉터리는 존재하지 않습니다.
+
+따라서 1.14.0 provisioning은 실제로 완료되지 않았고, 기존 1.10.0 설치가 보존된 상태입니다. 이는 provisioning 실패 시 기존 설치를 보존/복원하는 롤백 경로가 동작한 정황과 일치합니다.
+
+다만 이번 call-site grep은 `scheduleManagedCliProvisioning`이라는 정확한 함수명을 검색하지 않아 실제 재시도 호출 위치를 완전히 확인한 것은 아닙니다. 따라서 현 단계에서 “재시도 스케줄러가 전혀 없다”고 확정하지 않고, 정확한 함수 참조와 manager 시작/요청 처리 시 호출 여부를 추가 확인합니다.
+
 ## 현재 판정
 
 - 재부팅 뒤 브릿지가 완전히 미기동된 문제가 아님
 - generic bridge, manager, engine 프로세스는 살아 있음
 - 실제 live 데이터 조회 실패는 managed CLI 런타임 미준비와 연결됨
 - manager 요구 버전 1.14.0과 기존 descriptor 1.10.0 사이에 버전 불일치가 있음
-- 1.14.0 provisioning 실패 후 backoff가 기록됨
+- 실제 CLI 디렉터리는 1.9.0, 1.10.0만 존재하고 1.14.0은 없음
+- 1.14.0 provisioning 실패 후 기존 1.10.0 설치는 보존됨
 - backoff 만료 후에도 상태가 자동 회복되지 않은 것으로 관찰됨
-- 다음 단계는 provisioning 함수의 호출 조건/재시도 트리거와 실제 CLI 디렉터리 상태를 INSPECT_ONLY로 확인하는 것
+- 정확한 `scheduleManagedCliProvisioning` 호출 위치/재시도 트리거는 아직 미확정
+- 다음 단계는 정확한 함수 참조와 현재 npm registry/package 1.14.0 조회 가능 여부를 INSPECT_ONLY로 확인하는 것
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
