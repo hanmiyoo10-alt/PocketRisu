@@ -56,6 +56,25 @@ PocketRisu 듀얼폰 구성은 Termux의 터미널 화면을 계속 열어 둘 �
 
 또한 현재 메인폰의 `20-pocketrisu-ssh-tunnel` Termux:Boot 스크립트가 부팅 시 `termux-wake-lock`을 호출하는 것이 확인되어 있습니다. 이 wake lock이 장시간 유지되면 화면이 꺼진 뒤에도 CPU의 깊은 절전 진입을 방해해 배터리 소모와 발열에 영향을 줄 가능성이 있으므로, 전력 최적화에서 우선 점검 대상으로 둡니다. 실제 변경 전에는 현재 wake lock 유지 여부와 서비스 안정성에 미치는 영향을 INSPECT_ONLY로 확인합니다.
 
+## 서버폰 전력 기준값 INSPECT_ONLY — 2026-08-29
+
+서버폰에서 첫 전력/발열 기준값을 수집했습니다.
+
+- 배터리: 4%, 충전 안 됨(`DISCHARGING`)
+- 배터리 health: `GOOD`
+- 배터리 온도: 37.1°C
+- 배터리 전압: 약 3.314 V
+- 순간 전류: 약 -675 mA로 보고됨
+- 배터리 sysfs와 thermal zone은 Termux 권한/가시성 제한으로 유효한 값을 얻지 못함
+- `top -b -n 1` 순간 샘플에서는 전체 CPU가 거의 idle로 보였음
+- `pocketrisu`와 `sshd` runit 서비스는 약 58,800초 동안 유지 중
+- `server/node/server.cjs`는 약 563 MiB RSS, 누적 CPU 시간 약 81분 14초, `ps` 기준 CPU 약 8%로 관찰됨
+- 서비스 uptime과 누적 CPU 시간을 비교하면 `server.cjs`가 장기 평균으로 한 코어의 약 8.3%를 사용한 셈이라 서버폰 대기 전력/발열의 우선 조사 대상으로 판단
+- `generic_local_json_bridge.cjs`, local-usage manager/engine, sshd는 같은 시점에서 상대적으로 가벼웠음
+- taskbridge coordinator도 장기 누적 CPU 시간이 보여 별도 조사 후보로 남김
+
+현재 배터리가 4%로 매우 낮으므로 이 한 번의 측정만으로 전력 최적화 값을 확정하지 않습니다. 수정 전 `server.cjs`와 보조 프로세스들의 짧은 반복 CPU 샘플을 추가로 수집하고, 이후 더 안정적인 배터리 잔량 조건에서도 비교 측정합니다.
+
 ## 다음 단계
 
 구성 변경 전 양쪽 폰에서 배터리 상태, 온도, CPU 상위 프로세스, 관련 서비스 상태를 INSPECT_ONLY로 수집합니다. 결과를 바탕으로 실제 소비 원인을 먼저 좁힌 뒤 한 번에 한 항목만 변경하고 재측정합니다.
