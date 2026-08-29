@@ -14,7 +14,6 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - Android 15
 - Termux에서 `tailscale` CLI는 발견되지 않음
 - Android Tailscale 패키지는 Termux의 패키지 조회에서 발견되지 않음(패키지 가시성 제한 가능성은 별도 고려)
-- 1차 점검 당시 `sshd`와 여러 `sshd-session` 프로세스가 확인됨
 - `ip addr`, `ip route`, `ss -ltn`은 현재 Termux 권한 컨텍스트에서 netlink socket 접근이 `Permission denied`로 실패
 - `ifconfig` fallback으로 `wlan0`가 UP/RUNNING이고 현재 IPv4 주소가 `192.168.0.19/24`임을 확인
 - `termux-wifi-connectioninfo`에서도 현재 IP `192.168.0.19`, Wi‑Fi 연결 상태 `COMPLETED` 확인
@@ -26,7 +25,9 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
   - `PubkeyAuthentication yes`
   - `PasswordAuthentication yes`
 - 따라서 SSH 구성상 서버폰은 IPv4/IPv6 모든 인터페이스의 TCP 8022에서 수신하도록 설정되어 있음
-- 2차 점검의 `ps -A -o PID,PPID,NAME,ARGS | grep sshd` 출력은 비어 있었으므로, 현재 시점의 실제 `sshd` 프로세스 생존 여부는 별도 읽기 전용 확인이 필요
+- 최종 프로세스 재확인에서 `sshd` 본체와 여러 `sshd-session`이 모두 실행 중임을 확인
+- 로컬 TCP 8022 추가 검사에 사용하려던 `nc`는 서버폰 Termux에 설치되어 있지 않아 해당 검사만 미실행. 이는 sshd 장애를 의미하지 않음
+- 결론: 서버폰 SSH 측 INSPECT_ONLY는 정상으로 종료. 다음 단계는 메인폰의 기존 SSH core/notify 터널 및 VPN/Tailscale 상태 확인
 
 ## 진행 원칙
 
