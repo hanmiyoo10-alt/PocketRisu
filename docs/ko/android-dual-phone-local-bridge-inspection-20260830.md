@@ -89,11 +89,28 @@ Termux:Boot 스크립트에서는 브릿지 이름이 직접 참조되지 않았
 
 generic bridge는 인증 토큰이 필수이므로 다음 검사에서는 토큰 파일을 직접 읽어 요청 헤더에만 사용하고 토큰 값을 stdout/stderr에 출력하지 않습니다.
 
+## generic bridge 정상 / manager·engine 인증 필요 확인
+
+추가 기능 검사에서 다음 결과를 확인했습니다.
+
+- `39118 /snapshot`은 generic bridge token을 사용했을 때 HTTP 200으로 정상 응답
+- 응답의 `health.status`는 `ok`
+- 다만 snapshot의 monthly/weekly/credits/activity 값은 모두 0으로 반환되어, generic adapter 프로세스가 살아 있는 것과 실제 usage 데이터가 공급되는 것은 별개임을 확인
+- `39119 /status`는 인증 헤더 없이 호출했을 때 HTTP 401 `unauthorized`
+- `39117 /devpass-status`, `/orgs`, `/v1/summary`도 인증 헤더 없이 호출했을 때 HTTP 401 `Bridge token required`
+
+따라서 manager와 engine의 401 응답은 해당 서비스의 기능 장애 증거가 아니라 인증이 필요한 endpoint를 무인증으로 호출한 결과입니다. 현 단계에서 manager/engine 실패로 판정하지 않습니다.
+
+현재 가장 중요한 관찰은 **generic bridge가 정상 응답하면서도 snapshot 데이터가 0으로 비어 있다는 점**입니다. 재부팅 직후 로컬 플러그인이 죽은 것처럼 보였던 현상은 generic bridge 프로세스 부재보다, 뒤쪽 manager/engine/CLI/upstream 데이터 공급 또는 snapshot 갱신 체인이 아직 준비되지 않았던 상태와 더 잘 맞습니다.
+
+다음 검사는 manager/engine 소스에서 실제 인증 헤더 이름을 확인한 뒤, 비밀값을 출력하지 않고 동일한 token 파일을 요청 헤더에만 사용해 `/status`, `/devpass-status`, `/orgs`, `/v1/summary`를 인증 상태로 호출합니다.
+
 ## 현재 판정
 
-- generic local JSON bridge: 수동 점검 시 실행 중, runit 감독
-- local-usage bridge manager: 수동 점검 시 실행 중, runit 감독
-- local-usage bridge engine: 현재 HTTP health까지 정상
+- generic local JSON bridge: 실행 중, 인증된 `/snapshot` HTTP 200
+- generic snapshot health는 `ok`이지만 usage 값은 현재 0
+- local-usage bridge manager: 프로세스 실행 중이나 `/status`는 인증 필요
+- local-usage bridge engine: `/health`는 정상, 기능 API는 인증 필요
 - 세 서비스 모두 `down` 파일 없음
 - runsvdir 및 각 runsv 감독 프로세스는 수동 점검 시 정상
 - Termux:Boot → `start-services.sh` → `service-daemon start` → runsvdir 체인은 구성상 존재
@@ -101,6 +118,6 @@ generic bridge는 인증 토큰이 필수이므로 다음 검사에서는 토큰
 - 구조상 조건만으로 자동기동 성공을 판정했던 이전 판단은 철회
 - generic bridge는 부팅 시점부터 살아 있었던 것으로 보이지만 engine/manager는 이후 재기동 흔적이 있음
 - 현재 engine은 healthy지만 내부 circuit open 상태가 관찰되어 기능 계층 추가 확인 필요
-- 다음 단계는 manager `/status`와 generic bridge `/snapshot`을 실제 호출해 프로세스 생존과 기능 준비 상태를 분리 확인하는 것
+- 다음 단계는 실제 인증 헤더를 확인한 뒤 manager/engine 기능 API를 인증 상태로 검사하는 것
 
-정확한 Tailscale 주소, 계정 정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
+정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
