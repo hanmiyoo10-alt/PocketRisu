@@ -97,6 +97,28 @@ PRECHECK 뒤 `bridge-manager.cjs`만 백업한 후 최소 영구화 패치를 �
 - bundled engine 파일은 수정하지 않음
 - 설치 직후 manager/engine은 모두 재시작하지 않음
 
-다음 단계에서는 `local-usage-runtime-manager`만 재시작해 새 manager 코드가 정상 기동하고 현재 수동 run 파일을 `engineServiceEnvironmentReady=true`로 계속 인정하는지 확인합니다. 이 단계에서는 engine을 재시작하지 않아 이미 정상화된 live API 상태가 그대로 유지되는지도 함께 검증합니다. 이후 별도 단계에서 manager의 실제 engine sync/run-file 재생성 경로를 사용해 새 env 라인이 자동 생성되는지 검증합니다.
+## 영구화 manager 런타임 검증 성공
+
+영구화 패치가 설치된 manager만 재시작하고 engine은 재시작하지 않은 채 현재 정상 상태가 유지되는지 검증했습니다.
+
+- manager PID는 새 프로세스로 정상 교체됨
+- engine PID는 기존 프로세스 그대로 유지됨
+- manager 재시작 뒤 run 파일에는 `DEVPASS_BRIDGE_MANAGED_CLI=1`과 `LLMGATEWAY_CLI_VERSION=1.10.0`이 그대로 존재
+- 기존 engine 프로세스 환경에도 두 env가 유지됨
+- manager `/status`: HTTP 200
+- `cliRuntimeState=ready`
+- `cliRuntimeVersion=1.10.0`
+- `cliRuntimeProvisioning=ok`
+- `engineManaged=true`
+- `engineBundled=true`
+- `engineServiceEnvironmentReady=true`
+- engine `/devpass-status`: HTTP 200
+- engine `/orgs`: HTTP 200
+- engine `/v1/summary`: HTTP 200
+- 최종 `/health`: `healthy`, `circuits.open=0`
+
+따라서 새 manager 코드는 정상 기동하며 기존 정상 engine을 불필요하게 재시작하지 않고, 강화된 environment-ready 검사에서도 현재 run 파일을 정상으로 인정합니다. live API와 circuit 상태에도 회귀가 없습니다.
+
+아직 남은 검증은 **manager가 실제로 `writeEngineService()`를 호출해 run 파일을 새로 생성하는 경로에서도 `LLMGATEWAY_CLI_VERSION=1.10.0`을 스스로 작성하는지**입니다. 이 검증 전에는 어떤 manager endpoint가 가장 좁은 범위로 run 파일 재생성을 유발하는지 소스에서 먼저 확인하고, full PocketRisu 서비스나 다른 브릿지는 건드리지 않습니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
