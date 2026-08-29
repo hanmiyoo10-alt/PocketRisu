@@ -34,4 +34,17 @@ CLI version 1.10.0 적용 및 engine 정상화 과정에서 메인폰 PocketRisu
 
 그 뒤에만 서버폰에서 runit 서비스, manager CLI runtime 1.10.0, engine run env, live DevPass/org API, circuit 상태를 확인합니다. 예상과 다른 결과가 나오면 다른 서비스까지 재시작하지 않고 그 지점에서 원인을 좁힙니다.
 
+## 첫 메인폰 원격 복구 프로브: 미확정
+
+서버폰 재부팅 뒤 메인폰에서 첫 원격 복구 프로브를 실행했을 때 `pocketrisu-ssh-tunnel`은 run 상태였지만 표시된 PID의 경과 시간이 약 1초로 매우 짧아, runit이 막 새 터널 프로세스를 올렸거나 재시작 루프 중일 가능성이 보였습니다.
+
+같은 실행의 core health 결과는 `000`이었지만, 사용자가 붙여넣은 명령의 URL이 터미널에서 Markdown 링크 형태(`[http://...](http://...)`)로 변형된 흔적이 확인됐습니다. 따라서 이 `curl 000`은 실제 core reachability 결과로 신뢰하지 않습니다.
+
+현재 해석은 다음과 같습니다.
+
+- 자동복구 성공으로 볼 수 없음
+- `curl 000`만으로 서버 Tailscale 자동 연결 실패를 확정할 수도 없음
+- 짧은 tunnel PID age는 실제 연결 실패/재시작 가능성을 시사하므로 메인폰 tunnel 상태를 먼저 INSPECT_ONLY로 분리 진단해야 함
+- 서버폰 Termux/Tailscale/PocketRisu 앱은 아직 수동으로 열지 않고 테스트 상태를 보존
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
