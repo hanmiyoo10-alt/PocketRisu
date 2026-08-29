@@ -127,4 +127,20 @@ Termux:Boot 실행 여부를 분리하기 위해 `00-boot-probe`를 추가하고
 
 또한 probe 추가가 성공의 원인이라고 단정하지 않습니다. 이번 성공이 간헐적 부팅 타이밍 차이인지, JobScheduler 실행 순서/타이밍 변화와 관련 있는지, 또는 다른 요인인지 후속 검증이 필요합니다.
 
+## boot probe 추가 후 재부팅: 메인폰 원격 경로 PASS
+
+서버폰 앱을 수동으로 열지 않은 상태를 유지한 채 메인폰에서 원격 경로를 다시 INSPECT_ONLY로 확인했습니다.
+
+- `pocketrisu-ssh-tunnel`: 약 242초 동안 동일 PID로 안정 run
+- `pocketrisu-notify-tunnel`: 약 247초 동안 동일 PID로 안정 run
+- `pocketrisu-notify-relay`: 장시간 안정 run
+- `pocketrisu-reconnect-watch`: 장시간 안정 run
+- localhost core health: HTTP 200
+- localhost bridge engine health: HTTP 200
+- 기존 메인폰 정상복구 알림도 자동 발생
+
+따라서 **메인폰에서 관찰 가능한 서버 재부팅 자동복구 경로는 이번 시도에서 PASS**로 판정합니다. 최소한 서버 Tailscale reachability, 서버 sshd, 메인 SSH tunnel, PocketRisu core, local bridge engine까지 end-to-end 경로가 자동으로 복구되었습니다.
+
+다만 성공 원인은 아직 단정하지 않습니다. BootActivity 초기 실행만으로는 직전 재부팅이 실패했으므로, `00-boot-probe` 자체가 원인이라고 보지 않고 다음 서버폰 local INSPECT_ONLY에서 marker 생성 여부와 실제 runit/manager/engine 상태를 확인합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
