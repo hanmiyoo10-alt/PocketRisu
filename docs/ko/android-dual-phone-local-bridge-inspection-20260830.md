@@ -41,19 +41,27 @@ Termux:Boot 스크립트에서는 브릿지 이름이 직접 참조되지 않았
 - 서버폰 `$HOME/.termux/boot/00-pocketrisu-server`가 `$PREFIX/etc/profile.d/start-services.sh`를 source함
 - `start-services.sh`는 `service-daemon start`를 백그라운드에서 호출해 Termux services/runit 감독 트리를 시작함
 
-이 조합이면 재부팅 후 Termux:Boot가 실행될 때 `service-daemon start`가 runsvdir를 올리고, `down` 파일이 없는 세 브릿지 서비스는 runit에 의해 자동 기동될 구조입니다. 따라서 브릿지 프로세스를 Termux:Boot에 개별 `node ...` 명령으로 중복 추가할 필요가 없으며, 그렇게 하면 runit과 중복 실행될 위험이 있으므로 하지 않습니다.
+이 조합은 구성상 자동기동 조건을 갖춘 것으로 보였으나, 실제 사용자 재부팅 결과에서는 브릿지 기능이 자동으로 살아나지 않았습니다. 따라서 구조상 전제만으로 자동복구를 성공으로 판정하지 않습니다.
 
-단, 이는 구성상 자동기동 조건이 충족됐다는 판정이며 실제 재부팅 뒤 세 브릿지가 모두 다시 `run` 상태가 되는지는 아직 실재부팅 검증이 남아 있습니다.
+특히 이후 수동 점검 시에는 브릿지 관련 Node 프로세스와 runit 감독 프로세스가 실행 중인 상태가 관찰됐으므로, 실제 실패 원인은 단순히 `runsvdir` 자체가 시작되지 않은 경우로 단정할 수 없습니다. 다음 진단에서는 다음을 구분해야 합니다.
+
+- 재부팅 직후 브릿지 서비스 프로세스 자체가 없었는지
+- 프로세스는 있었지만 로컬 플러그인/DevPass 기능이 준비되지 않았는지
+- manager/engine이 부팅 후 늦게 재시작되거나 초기화 순서가 꼬였는지
+- 브릿지 로그에 부팅 시점 오류가 남았는지
+
+브릿지 프로세스를 Termux:Boot에 개별 `node ...` 명령으로 중복 추가하는 수정은 아직 하지 않습니다. runit과 중복 실행될 위험이 있으므로 실제 실패 원인을 먼저 확인합니다.
 
 ## 현재 판정
 
-- generic local JSON bridge: 현재 실행 중, runit 감독
-- local-usage bridge manager: 현재 실행 중, runit 감독
-- local-usage bridge engine: 현재 실행 중, runit 감독
+- generic local JSON bridge: 수동 점검 시 실행 중, runit 감독
+- local-usage bridge manager: 수동 점검 시 실행 중, runit 감독
+- local-usage bridge engine: 수동 점검 시 실행 중, runit 감독
 - 세 서비스 모두 `down` 파일 없음
-- runsvdir 및 각 runsv 감독 프로세스 정상
-- Termux:Boot → `start-services.sh` → `service-daemon start` → runsvdir → 브릿지 서비스의 자동기동 체인이 구성상 연결됨
-- 브릿지 직접 실행 명령을 Termux:Boot에 추가할 필요 없음
-- 실제 재부팅 후 자동기동 검증만 남음
+- runsvdir 및 각 runsv 감독 프로세스는 수동 점검 시 정상
+- Termux:Boot → `start-services.sh` → `service-daemon start` → runsvdir 체인은 구성상 존재
+- **실제 재부팅 후 브릿지 기능 자동복구는 실패 관찰됨**
+- 구조상 조건만으로 자동기동 성공을 판정했던 이전 판단은 철회
+- 다음 단계는 수정 없이 재부팅 이후 서비스 상태/프로세스 시작 시각/브릿지 로그를 INSPECT_ONLY로 확인하는 것
 
 정확한 Tailscale 주소, 계정 정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
