@@ -103,4 +103,18 @@ manager 소스에서 확인된 상수/동작:
 
 따라서 다음 수정은 해당 상수 한 곳만 `1.10.0`으로 바꾸는 최소 변경으로 진행할 수 있습니다. 수정 직후에는 manager를 재시작하기 전에 백업 해시, diff, syntax를 먼저 검증합니다.
 
+## 첫 수정 시도는 안전하게 중단됨
+
+첫 최소 수정 명령은 원본 해시와 단일 대상 일치를 재확인한 뒤 timestamp 백업을 정상 생성했습니다.
+
+- 백업: `$HOME/.local/share/local-usage-dashboard/runtime/bridge-manager.cjs.bak-cli-version-20260830-032103`
+- 백업 SHA256은 원본과 동일한 `35bf1562638a5cb0d25163eea1c795e8eeb1f721af2b1b6d4f15c05d15950854`
+- 임시 내용에서는 `1.14.0` 일치가 0개, `1.10.0` 일치가 정확히 1개로 최소 패치 자체는 정상 생성됨
+
+그러나 임시 파일 이름이 `bridge-manager.cjs.tmp.<pid>` 형태여서 Node.js 26의 `node --check`가 마지막 확장자를 `.pid` 형태의 알 수 없는 확장자로 판단하고 `ERR_UNKNOWN_FILE_EXTENSION`을 반환했습니다.
+
+명령이 `set -e` 상태였기 때문에 syntax check 단계에서 즉시 종료되었고, 이후의 atomic `mv` 설치 단계는 실행되지 않았습니다. 따라서 이 시도에서는 원본 `bridge-manager.cjs`가 수정되지 않았으며 manager도 재시작되지 않았습니다. trap cleanup이 임시 파일을 제거하도록 구성되어 있어 실패는 안전하게 중단된 것으로 판정합니다.
+
+다음 시도에서는 임시 파일 이름을 `bridge-manager.tmp.<pid>.cjs`처럼 마지막 확장자가 `.cjs`가 되도록 바꾸고, 원본 SHA와 백업 SHA를 다시 확인한 뒤 동일한 최소 패치를 재검증합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
