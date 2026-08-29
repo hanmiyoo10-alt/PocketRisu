@@ -32,7 +32,7 @@
 - state 갱신 시각: 2026-08-30 01:37 KST 부근
 - 다음 재시도 예정 시각: 2026-08-30 02:07 KST 부근
 
-점검 시점에는 이 재시도 예정 시각이 이미 약 1시간 이상 지난 상태였지만 manager `/status`는 여전히 `unavailable/backoff`였습니다. 따라서 단순히 30분 backoff가 끝나면 자동으로 재시도가 수행되는 구조인지 의심이 생겼으며, provisioning 함수의 실제 호출 트리거를 추가 확인해야 합니다.
+점검 시점에는 이 재시도 예정 시각이 이미 약 1시간 이상 지난 상태였지만 manager `/status`는 여전히 `unavailable/backoff`였습니다.
 
 manager 소스에서 확인된 상수/동작:
 
@@ -42,41 +42,53 @@ manager 소스에서 확인된 상수/동작:
 - 성공 시 descriptor/state를 현재 요구 버전으로 갱신
 - 실패 시 `unavailable/backoff`와 다음 재시도 시각 기록
 
-현재 GitHub HTTPS 접근은 HTTP 200으로 정상 확인되어, 점검 시점의 일반 네트워크 연결 자체는 정상입니다. 다만 최초 provisioning 실패 시점의 직접 원인이 네트워크였는지는 아직 확정하지 않습니다.
+## provisioning 함수와 실제 CLI 디렉터리 확인
 
-## provisioning 함수와 실제 CLI 디렉터리 추가 확인
-
-추가 INSPECT_ONLY에서 `provisionManagedCli()` 본문과 현재 CLI 디렉터리 트리를 확인했습니다.
-
-확인된 provisioning 동작:
-
-- 요구 버전 디렉터리 검증에 성공하면 descriptor/state를 `ready`로 갱신하고 종료
-- 요구 버전이 없거나 검증 실패하면 이전 `nextRetryAt`을 확인
-- backoff가 끝났으면 임시 stage 디렉터리를 만들고 `npm install --ignore-scripts --no-audit --no-fund --package-lock=true` 실행
-- 설치 성공 후 stage를 요구 버전 디렉터리로 승격하고 descriptor/state를 갱신
-- 실패 시 stage를 제거하고 기존 버전 디렉터리가 격리되었다면 복원한 뒤 `unavailable/backoff`를 기록
+`provisionManagedCli()`는 요구 버전 디렉터리가 정상 검증되면 descriptor/state를 `ready`로 갱신하고, 그렇지 않으면 stage 디렉터리에서 npm install을 수행합니다. 설치 실패 시 stage를 제거하고 기존 버전이 격리되었다면 복원한 뒤 `unavailable/backoff`를 기록합니다.
 
 현재 실제 디스크에는 다음 CLI 버전 디렉터리만 존재합니다.
 
 - `1.9.0`
 - `1.10.0`
 
-두 디렉터리 모두 실제 `@llmgateway/cli` package가 설치되어 있고 package metadata의 버전도 각각 1.9.0, 1.10.0으로 일치합니다. 반면 manager가 요구하는 `1.14.0` 디렉터리는 존재하지 않습니다.
+두 디렉터리 모두 실제 `@llmgateway/cli` package metadata와 버전이 일치합니다. manager가 요구하는 `1.14.0` 디렉터리는 존재하지 않습니다. 따라서 1.14.0 provisioning은 완료되지 않았고 기존 1.10.0 설치가 보존된 상태입니다.
 
-따라서 1.14.0 provisioning은 실제로 완료되지 않았고, 기존 1.10.0 설치가 보존된 상태입니다. 이는 provisioning 실패 시 기존 설치를 보존/복원하는 롤백 경로가 동작한 정황과 일치합니다.
+## 원인 확정 — 존재하지 않는 CLI 버전 + one-shot provisioning
 
-다만 이번 call-site grep은 `scheduleManagedCliProvisioning`이라는 정확한 함수명을 검색하지 않아 실제 재시도 호출 위치를 완전히 확인한 것은 아닙니다. 따라서 현 단계에서 “재시도 스케줄러가 전혀 없다”고 확정하지 않고, 정확한 함수 참조와 manager 시작/요청 처리 시 호출 여부를 추가 확인합니다.
+추가 INSPECT_ONLY에서 정확한 provisioning 호출 위치와 npm registry 상태를 확인했습니다.
 
-## 현재 판정
+- `scheduleManagedCliProvisioning()` 참조는 함수 정의와 manager `server.listen()` callback 내부의 `setImmediate(() => scheduleManagedCliProvisioning())` 한 곳만 확인됨
+- 30분 backoff 값을 기록하는 코드는 있으나, backoff 만료 후 다시 provisioning을 호출하는 `setTimeout`/`setInterval` 재시도 스케줄은 확인되지 않음
+- npm registry는 `https://registry.npmjs.org/`
+- `npm view @llmgateway/cli@1.14.0 version` → HTTP/npm E404, 해당 버전 없음
+- `npm view @llmgateway/cli version` → `1.10.0`
 
-- 재부팅 뒤 브릿지가 완전히 미기동된 문제가 아님
-- generic bridge, manager, engine 프로세스는 살아 있음
-- 실제 live 데이터 조회 실패는 managed CLI 런타임 미준비와 연결됨
-- manager 요구 버전 1.14.0과 기존 descriptor 1.10.0 사이에 버전 불일치가 있음
-- 실제 CLI 디렉터리는 1.9.0, 1.10.0만 존재하고 1.14.0은 없음
-- 1.14.0 provisioning 실패 후 기존 1.10.0 설치는 보존됨
-- backoff 만료 후에도 상태가 자동 회복되지 않은 것으로 관찰됨
-- 정확한 `scheduleManagedCliProvisioning` 호출 위치/재시도 트리거는 아직 미확정
-- 다음 단계는 정확한 함수 참조와 현재 npm registry/package 1.14.0 조회 가능 여부를 INSPECT_ONLY로 확인하는 것
+따라서 현재 장애 원인은 다음 조합으로 확정합니다.
+
+1. manager 코드가 npm registry에 존재하지 않는 `@llmgateway/cli@1.14.0`을 요구함
+2. manager 시작 시 provisioning이 한 번 실행됨
+3. 1.14.0 설치는 E404로 실패함
+4. state가 `unavailable/backoff`로 기록됨
+5. backoff 만료 시각을 기록하지만 자동 재호출 스케줄이 없어 같은 manager 프로세스에서는 상태가 스스로 회복되지 않음
+6. 기존 1.10.0 설치는 남아 있지만 manager의 strict version check 때문에 managed runtime으로 사용되지 않음
+
+즉 재부팅 후 브릿지 관련 프로세스가 모두 살아 있어도 live DevPass/organization 조회는 실패하는 반쪽 상태가 될 수 있습니다. 사용자가 관찰한 “재부팅 후 브릿지가 안 살아남” 현상과 일치합니다.
+
+## 수정 방향
+
+안전한 최소 수정 후보는 현재 npm registry의 실제 최신 버전이자 기존에 정상 설치되어 있는 `1.10.0`을 manager의 managed CLI 요구 버전으로 되돌리는 것입니다. 이 경우 manager 재시작 시 기존 `1.10.0` 디렉터리를 검증해 descriptor/state를 `ready/ok`로 갱신할 수 있을 것으로 예상됩니다.
+
+실제 수정은 서버폰 로컬 runtime 파일을 대상으로 다음 순서를 지킵니다.
+
+1. 수정 전 해당 상수의 정확한 단일 일치 여부와 파일 해시 확인
+2. timestamp 백업
+3. `1.14.0` → `1.10.0` 최소 1곳 변경
+4. syntax check
+5. `local-usage-runtime-manager`만 재시작
+6. manager `/status`에서 `cliRuntimeState=ready`, `cliRuntimeVersion=1.10.0`, `cliRuntimeProvisioning=ok` 확인
+7. engine `/devpass-status`, `/orgs`를 인증 상태로 재검증
+8. 재부팅 후 자동복구 재검증
+
+자동 재시도 스케줄러 추가는 별도 개선 사항으로 남길 수 있으나, 먼저 잘못된 비존재 버전 요구를 바로잡는 것이 최소 범위 수정입니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
