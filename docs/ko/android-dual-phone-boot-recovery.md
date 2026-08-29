@@ -84,12 +84,23 @@ Termux:Boot에는 다음 파일이 존재합니다.
 
 이 패턴은 runit 자체가 멈춘 것이 아니라 core/notify SSH 서비스를 반복 재기동하고 있으나 연결이 성립하지 않는 상태와 일치합니다. 즉 정적 runit 자동기동/재시도는 작동하지만, 재부팅 뒤 Tailscale 경로 또는 그 하위 네트워크 도달성이 준비되지 않아 자동복구가 완료되지 않은 것으로 판단합니다.
 
-아직 Tailscale 앱을 수동으로 열거나 서비스를 수동으로 재시작하지 않은 상태에서 원인을 더 확인해야 합니다. 다음 단계는 core/notify runit 로그와 서버폰 Tailscale SSH 목적지 TCP 8022 도달성을 INSPECT_ONLY로 확인하는 것입니다.
+## 재부팅 후 Tailscale 경로 INSPECT_ONLY — 2026-08-29
+
+Tailscale 앱을 수동으로 열거나 터널 서비스를 수동 재시작하지 않은 상태에서 추가 검사했습니다.
+
+- core/notify 서비스의 예상 로그 경로에서는 `current` 로그 파일을 찾지 못함
+- Termux에서 `pidof com.tailscale.ipn` 결과는 비어 있었고 `ps -A`에서도 Tailscale 프로세스가 보이지 않았음
+- 이 결과만으로 Android 시스템의 Tailscale VPN 비활성 상태를 절대적으로 증명하지는 않음. Android/Termux 프로세스 가시성 제한 가능성을 고려함
+- 서버폰의 Tailscale 주소 TCP 8022에 `ssh-keyscan`을 시도했으나 종료코드 1, key 출력 0줄로 실패
+- 해당 검사에서 별도 stderr 메시지는 얻지 못함
+- 같은 시점 `http://127.0.0.1:6001/api/health`도 계속 연결 실패해 `core_health=FAILED`
+
+이 결과는 재부팅 뒤 runit/Termux 서비스는 올라왔지만 Tailscale 경로를 통한 서버폰 SSH 도달성이 회복되지 않았다는 사실을 추가로 확인합니다. 특히 Tailscale Android VPN이 자동으로 활성화되지 않았을 가능성이 높아졌지만, 메인폰의 일반 인터넷/모바일 데이터 자체가 정상인지 확인하기 전까지 원인을 Tailscale 단독 문제로 확정하지 않습니다.
 
 ## 현재 판단
 
 정적 구성 기준으로 runit 자동기동/재시도는 동작하지만, 첫 실제 재부팅에서는 약 90초 대기 이후에도 core health가 회복되지 않았고 watcher도 down 상태에서 복구되지 않았습니다.
 
-따라서 재부팅 자동복구는 현재 **실패**로 판정합니다. 원인은 아직 Tailscale Android VPN이 재부팅 후 자동으로 올라오지 않은 것인지, 올라왔지만 tailnet 경로가 준비되지 않은 것인지, 또는 다른 네트워크 문제인지 확정하지 않습니다.
+따라서 재부팅 자동복구는 현재 **실패**로 판정합니다. 현재 가장 유력한 원인은 재부팅 후 Tailscale Android VPN/경로가 자동으로 준비되지 않은 경우지만, 다음 단계에서 메인폰의 일반 인터넷 연결을 먼저 확인한 뒤 Tailscale 앱 상태를 확인해야 합니다.
 
 현재 단계에서는 구성 파일을 수정하지 않았습니다.
