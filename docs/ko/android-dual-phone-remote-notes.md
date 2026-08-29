@@ -14,10 +14,19 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - Android 15
 - Termux에서 `tailscale` CLI는 발견되지 않음
 - Android Tailscale 패키지는 Termux의 패키지 조회에서 발견되지 않음(패키지 가시성 제한 가능성은 별도 고려)
-- `sshd` 프로세스와 여러 `sshd-session`이 실행 중이어서 SSH 서버는 동작 중
-- `sshd_config`에 명시적 `Port`, `ListenAddress`, `AddressFamily` 항목은 없음
+- 1차 점검 당시 `sshd`와 여러 `sshd-session` 프로세스가 확인됨
 - `ip addr`, `ip route`, `ss -ltn`은 현재 Termux 권한 컨텍스트에서 netlink socket 접근이 `Permission denied`로 실패
-- 따라서 네트워크 주소/라우팅/리스닝 포트는 다른 읽기 전용 방법으로 추가 확인 필요
+- `ifconfig` fallback으로 `wlan0`가 UP/RUNNING이고 현재 IPv4 주소가 `192.168.0.19/24`임을 확인
+- `termux-wifi-connectioninfo`에서도 현재 IP `192.168.0.19`, Wi‑Fi 연결 상태 `COMPLETED` 확인
+- `sshd -T` 유효 설정:
+  - `Port 8022`
+  - `AddressFamily any`
+  - `ListenAddress 0.0.0.0:8022`
+  - `ListenAddress [::]:8022`
+  - `PubkeyAuthentication yes`
+  - `PasswordAuthentication yes`
+- 따라서 SSH 구성상 서버폰은 IPv4/IPv6 모든 인터페이스의 TCP 8022에서 수신하도록 설정되어 있음
+- 2차 점검의 `ps -A -o PID,PPID,NAME,ARGS | grep sshd` 출력은 비어 있었으므로, 현재 시점의 실제 `sshd` 프로세스 생존 여부는 별도 읽기 전용 확인이 필요
 
 ## 진행 원칙
 
