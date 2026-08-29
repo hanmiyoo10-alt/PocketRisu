@@ -70,8 +70,11 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - 기기명은 `s21-ultra`, `s25-ultra`로 확인됨
 - Exit Node는 `None` 상태로, 현재 목적에 맞게 일반 tailnet 연결만 사용 중임
 - 공개 저장소에는 계정 식별 정보와 정확한 Tailscale 100.x 주소를 기록하지 않음
-- 다음 검증은 메인폰에서 서버폰의 Tailscale 주소 TCP 8022에 SSH host key를 읽기 전용으로 조회하고, 기존 LAN 경로의 host key와 동일한지 비교하는 단계임
-- 이 검증이 성공하면 메인폰 Wi‑Fi를 끄고 모바일 데이터에서 같은 Tailscale 경로로 다시 검증한 뒤, runit 파일 백업 → 서버 목적지 치환 → 서비스별 검증 순으로 전환함
+- 메인폰에서 기존 LAN 경로와 Tailscale 경로 각각으로 서버폰 TCP 8022의 SSH host key를 `ssh-keyscan`으로 읽기 전용 조회함
+- ECDSA, RSA, ED25519 세 host key fingerprint가 두 경로에서 모두 일치함
+- 따라서 Tailscale 경로의 TCP 8022가 기존 LAN 경로와 동일한 서버폰의 Termux sshd에 도달하는 것이 검증됨
+- 다음 검증은 메인폰 Wi‑Fi를 끄고 모바일 데이터에서 같은 Tailscale 경로로 다시 host key를 조회하는 단계임
+- 모바일 데이터 검증까지 성공하면 runit 파일 백업 → 서버 목적지 치환 → 서비스별 검증 순으로 전환함
 
 ## Tailscale 적합성 판단
 
@@ -83,6 +86,7 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - core/local forward와 notify/reverse tunnel이 서로 다른 runit 서비스로 분리되어 있어, Tailscale 전환 시 서비스별 백업·검증·롤백이 가능하다.
 - 메인폰의 Android VPN 설정 UI 확인 결과 기존 별도 활성 VPN이 없어 Tailscale과의 VPN 슬롯 충돌 가능성도 낮다.
 - 두 기기가 실제로 같은 tailnet에 온라인 상태로 들어온 것이 확인되어 네트워크 오버레이 도입 자체는 성공함
+- LAN 경로와 Tailscale 경로의 SSH host key가 모두 일치해 Tailscale이 동일한 서버폰 sshd까지 도달하는 것도 검증됨
 - 목적은 기존 core/notify/relay 기능을 대체하는 것이 아니라, 그 아래의 메인폰↔서버폰 네트워크 경로를 고정·암호화하는 것이다.
 - 서버폰을 exit node나 subnet router로 쓰는 것은 현재 목표에 필요하지 않으므로 우선 제외한다.
 
