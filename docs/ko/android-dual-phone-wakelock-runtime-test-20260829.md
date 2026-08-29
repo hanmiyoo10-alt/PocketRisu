@@ -43,6 +43,20 @@
 
 이 단계에서는 현재 실행 중인 세션의 wake lock 상태를 변경하지 않았으며, 실제 재부팅 후 자동 health 대기와 wake lock 자동 해제가 정상 동작하는지는 아직 검증 전이다.
 
+## 서버폰 현재 런타임 wake-unlock 재검증 — 2026-08-30
+
+새 부팅 스크립트 설치 후 실제 재부팅 검증에 들어가기 전, 현재 실행 중인 세션에서 `termux-wake-unlock`을 다시 적용해 서비스 영향 여부를 확인했다.
+
+결과:
+
+- `termux-wake-unlock` 반환 코드: `0`
+- `pocketrisu`: `run`
+- `sshd`: `run`
+- 로컬 `/api/health`: `ok=true`, `status=ready`
+- 해당 시점 서버 uptime은 약 505초
+
+따라서 현재 런타임에서는 wake lock을 해제해도 PocketRisu 서버와 sshd가 즉시 중단되지 않고 health가 정상 유지되는 것을 재확인했다. 다음 단계는 서버폰을 실제 재부팅한 뒤 사용자가 Termux/Tailscale 앱을 수동으로 열지 않은 상태에서 부팅 자동기동, PocketRisu health 복구, 그리고 부팅 단계 wake lock 자동 해제가 모두 정상인지 검증하는 것이다.
+
 현재 판정:
 
 - 서버폰 Termux wake lock 없이 최소 약 10분 화면-off 생존 성공
@@ -51,6 +65,7 @@
 - 사용자에게 보이는 Android 호출/알림은 메인폰 전용 동작과 일치함
 - 서버폰 실제 전원이 꺼지면 현재 구조에서는 PocketRisu 백엔드도 함께 중단됨
 - 서버폰 부팅 스크립트는 상시 wake lock에서 부팅 단계 한정 wake lock + 자동 해제 구조로 수정 완료
+- 현재 런타임 `termux-wake-unlock` 재검증도 서비스/health 정상으로 통과
 - 실제 재부팅 자동복구 및 자동 wake-unlock 검증은 아직 남아 있음
 - 이 결과만으로 장시간(수 시간~수일) 안정성을 아직 확정하지 않음
 
