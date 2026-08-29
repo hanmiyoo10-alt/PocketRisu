@@ -75,6 +75,25 @@ PocketRisu 듀얼폰 구성은 Termux의 터미널 화면을 계속 열어 둘 �
 
 현재 배터리가 4%로 매우 낮으므로 이 한 번의 측정만으로 전력 최적화 값을 확정하지 않습니다. 수정 전 `server.cjs`와 보조 프로세스들의 짧은 반복 CPU 샘플을 추가로 수집하고, 이후 더 안정적인 배터리 잔량 조건에서도 비교 측정합니다.
 
+## 메인폰 전력 기준값 INSPECT_ONLY — 2026-08-29
+
+메인폰에서 첫 전력/발열 기준값을 수집했습니다.
+
+- 배터리: 13%, 충전 안 됨(`DISCHARGING`)
+- 배터리 health: `GOOD`
+- 배터리 온도: 36.8°C
+- 배터리 전압: 약 3.685 V
+- 순간 전류: 약 -812 mA
+- 평균 전류: 약 -919 mA
+- 해당 측정은 화면을 켜고 Termux에서 명령을 실행하는 중이므로 실제 화면-off idle 소비량으로 간주하지 않음
+- core SSH local forward, notify SSH reverse forward, notify relay, reconnect watcher는 모두 `run`
+- `top`/`ps`에서 두 SSH 터널, `receiver.cjs`, reconnect watcher의 순간 CPU 사용은 사실상 0% 수준
+- 메인폰 thermal zone에서 CPU 계열은 대략 46~50°C, GPU/모뎀/기타 SoC 센서는 대략 44~46°C 범위로 관찰됨
+- 따라서 이 시점의 발열은 Termux의 PocketRisu 백그라운드 프로세스가 지속적으로 CPU를 많이 쓰는 현상으로는 설명되지 않음
+- 화면 켜짐, Android 시스템, Tailscale Always-on, 모바일 모뎀, Firefox/PocketRisu 전면 사용, 그리고 Termux wake lock 영향 등을 분리해서 봐야 함
+
+메인폰 역시 배터리 잔량이 13%로 낮고 화면-on 측정이므로, 현재 전류 수치만으로 장시간 대기 소모를 확정하지 않습니다. 다음 우선 점검은 부팅 스크립트에서 요청한 Termux wake lock이 현재 장시간 유지 중인지 INSPECT_ONLY로 확인하는 것입니다.
+
 ## 다음 단계
 
 구성 변경 전 양쪽 폰에서 배터리 상태, 온도, CPU 상위 프로세스, 관련 서비스 상태를 INSPECT_ONLY로 수집합니다. 결과를 바탕으로 실제 소비 원인을 먼저 좁힌 뒤 한 번에 한 항목만 변경하고 재측정합니다.
