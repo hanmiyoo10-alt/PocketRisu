@@ -109,10 +109,25 @@ Tailscale 앱을 수동으로 열지 않은 상태에서 메인폰의 일반 인
 
 따라서 현재 실패는 일반 인터넷 부재로 설명되지 않습니다. runit은 core/notify SSH를 재시도하고 있으나, Tailscale 경로만 회복되지 않은 상태와 가장 잘 일치합니다. 재부팅 후 Tailscale Android VPN이 자동 활성화되지 않았을 가능성이 현재 가장 유력합니다.
 
+## Tailscale 앱 열기만으로 즉시 복구 — 2026-08-29
+
+Tailscale 앱을 열기 전에는 일반 인터넷은 정상인 반면 tailnet SSH 도달성과 core health가 실패한 상태였습니다. 이후 사용자가 Tailscale 앱을 **열기만 했고 별도 연결 토글 조작은 하지 않은 상태에서**, 앱 화면이 즉시 나타남과 동시에 PocketRisu reconnect watcher의 `서버 연결 복구` Android 알림도 메인폰에 표시됐습니다.
+
+이 관찰은 다음 순서와 가장 잘 일치합니다.
+
+1. 재부팅 후 Termux:Boot와 runit은 정상 기동
+2. core/notify SSH는 Tailscale 경로가 없어 반복 재시도
+3. 일반 모바일 데이터/인터넷은 정상
+4. Tailscale 앱을 여는 행위가 Android Tailscale VPN/세션 활성화를 촉발
+5. tailnet 경로가 살아나자 runit의 다음 SSH 재시도에서 core가 연결됨
+6. reconnect watcher가 health 연속 성공을 감지해 메인폰에 복구 알림 표시
+
+따라서 첫 재부팅 자동복구 실패의 원인은 PocketRisu core, SSH runit 재시도, 일반 인터넷 문제가 아니라 **메인폰 Android에서 Tailscale이 재부팅 후 자동으로 활성화되지 않은 것**으로 사실상 확정합니다.
+
+다음 조치 후보는 Android/Tailscale의 항상 켜짐 VPN(Always-on VPN), 백그라운드 실행/배터리 제한 해제 등 재부팅 후 Tailscale VPN 자동 활성화 조건을 점검하는 것입니다. 변경 전에는 현재 설정을 먼저 INSPECT_ONLY로 확인합니다.
+
 ## 현재 판단
 
-정적 구성 기준으로 runit 자동기동/재시도는 동작하지만, 첫 실제 재부팅에서는 약 90초 대기 이후에도 core health가 회복되지 않았고 watcher도 down 상태에서 복구되지 않았습니다.
+PocketRisu 측 부팅 자동기동과 runit 재시도 구조는 정상입니다. 실패 지점은 메인폰 Android의 Tailscale 자동 활성화입니다. Tailscale 앱을 수동으로 열면 tailnet과 core가 즉시 복구되고 reconnect watcher 알림까지 정상 동작하므로, PocketRisu/SSH 구성 자체의 추가 수정은 우선 필요하지 않습니다.
 
-일반 인터넷은 정상인데 서버폰 Tailscale SSH 도달성과 core health만 실패하므로, 현재 가장 유력한 원인은 **재부팅 후 Tailscale Android VPN/경로가 자동으로 올라오지 않은 것**입니다. 다음 단계에서는 Tailscale 앱을 열기만 하고 별도 토글 조작 없이 현재 상태와, 앱을 여는 행위만으로 tailnet/core가 회복되는지 확인해야 합니다.
-
-현재 단계에서는 구성 파일을 수정하지 않았습니다.
+현재 단계에서는 PocketRisu 구성 파일을 수정하지 않았습니다.
