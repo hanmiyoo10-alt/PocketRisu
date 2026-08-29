@@ -51,7 +51,7 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - `pocketrisu-ssh-tunnel`은 local forward `6001`, `39117`, `39118`, `39119`를 담당함
 - reverse `39120` 프로세스는 부모 PID가 `runsv pocketrisu-notify-tunnel`이며, 별도 runit 서비스 `pocketrisu-notify-tunnel`이 담당하는 것으로 확정됨
 - `pocketrisu-notify-tunnel/run`도 `u0_a34@192.168.0.19:8022`를 직접 목적지로 사용하며 reverse forward `127.0.0.1:39120`을 담당함
-- 즉 core/local forward 터널과 notify/reverse 터널은 runit 서비스 단위로 분리되어 있음
+- 즉 core/local forward 터널과 notify/reverse tunnel이 서로 다른 runit 서비스로 분리되어 있음
 - `pocketrisu-notify-relay`는 별도 runit 서비스로 `receiver.cjs`를 실행 중이며, notify tunnel과 relay도 분리되어 있음
 - `192.168.0.19` 검색에서 migration backup 파일들과 과거 상태 로그도 함께 발견됨. 이들 백업/로그는 현재 실행 구성 파일과 구분해서 다뤄야 함
 - `.local/state/pocketrisu-ssh-tunnel/current`의 `Connection refused` 다수는 2026-08-27 기록으로, 현재 시점의 장애를 의미하지 않음
@@ -110,7 +110,11 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - JSON body는 `stage`, `elapsedMs`, `character`, `model`, `sound`를 읽고, `stage=start`가 아니면 완료 알림으로 처리함
 - 실제 Android 알림 생성은 메인폰의 `termux-notification`을 사용하며 notification id `8472`, PocketRisu 제목/내용, high priority로 생성됨
 - 따라서 reverse SSH `39120`은 서버폰 측 loopback 요청을 메인폰의 loopback-only relay로 전달하는 역할이며, Android 알림 자체는 메인폰에서만 생성되는 구조임
-- 다음 단계는 메인폰 loopback에서 relay health 및 인증된 테스트 알림 1개를 검증 → 기존 서버 측 발신 경로를 확인해 reverse tunnel end-to-end 검증 → 모바일망/다른 Wi-Fi 최종 재검증 순으로 진행함
+- 메인폰 loopback에서 `GET /health`가 정상 응답하고, token을 노출하지 않는 방식의 인증된 `POST /notify` 테스트가 JSON `{"ok":true}`와 HTTP 200을 반환함
+- 같은 테스트에서 메인폰 Android에 실제 PocketRisu 테스트 알림이 표시되어 relay + token 인증 + `termux-notification` 구간이 정상임을 검증함
+- 이어서 서버폰에서 `http://127.0.0.1:39120/health`를 호출했고 JSON `{"ok":true}`와 HTTP 200을 반환함
+- 따라서 서버폰 localhost → Tailscale reverse SSH `39120` → 메인폰 loopback relay 경로도 실제로 정상 동작함을 확인함
+- 다음 단계는 기존 서버 측 알림 발신 코드를 INSPECT_ONLY로 확인해 실제 PocketRisu 발신 경로를 보존한 end-to-end 알림 검증 → 모바일망/다른 Wi-Fi 최종 재검증 순으로 진행함
 
 ## Tailscale 적합성 판단
 
@@ -128,6 +132,7 @@ PocketRisu를 서버폰과 메인폰으로 분리해 운용할 때의 원격 접
 - `BatchMode=yes` + `StrictHostKeyChecking=yes` 직접 SSH 인증도 Tailscale 경로에서 성공해 기존 인증 체계를 그대로 유지할 수 있음이 확인됨
 - core/local 터널은 실제 runit 재시작 후 Tailscale 목적지로 실행 전환되었고, `/api/health`까지 정상이라 core 전환은 완료됨
 - notify/reverse 터널도 실제 runit 재시작 후 Tailscale 목적지로 실행 전환되었으며, 메인폰 notify relay와 core health가 모두 정상이라 SSH 경로 전환은 완료됨
+- 메인폰 local relay 알림 생성과 서버폰→reverse→메인폰 relay health 모두 정상이라 notify 전송 기반 경로도 검증됨
 - 목적은 기존 core/notify/relay 기능을 대체하는 것이 아니라, 그 아래의 메인폰↔서버폰 네트워크 경로를 고정·암호화하는 것이다.
 - 서버폰을 exit node나 subnet router로 쓰는 것은 현재 목표에 필요하지 않으므로 우선 제외한다.
 
