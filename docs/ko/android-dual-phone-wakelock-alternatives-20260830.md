@@ -64,4 +64,10 @@ root 환경에서 Android init/Magisk service 등으로 Termux UID 밖의 더 �
 
 다음 A/B에서는 다른 변수를 바꾸지 않고 현재 임시 wake lock을 유지한 채 이 옵션만 ON으로 변경합니다. 옵션 변경 직후에는 wake lock을 그대로 둔 상태에서 기능 이상이 없는지 먼저 확인하고, 그 다음 단계에서만 런타임 wake lock을 해제해 장시간 실사용 안정성을 비교합니다. 이 순서로 진행해야 child-process 제한 해제가 wake lock을 실제로 대체할 수 있는지 분리해서 판단할 수 있습니다.
 
+## child-process 제한 해제 후 soak
+
+서버폰에서 `Disable child process restrictions`를 ON으로 바꾼 뒤에도 임시 wake lock은 유지한 채 실사용을 계속했습니다. 사용자는 이후 충분한 시간 동안 PocketRisu를 정상 사용했고 즉시 끊김이나 기능 이상을 관찰하지 않았다고 보고했습니다.
+
+정확한 분 단위 타이머를 두고 잰 soak는 아니므로 이 단계만으로 child-process 제한 해제가 안정성을 만들었다고 판정하지는 않습니다. 다만 **옵션 ON 자체가 현재 PocketRisu/runit/sshd 동작에 즉시 악영향을 주지 않는다는 1단계 확인은 통과**한 것으로 보고, 다음 단계에서만 wake lock을 런타임 해제하여 단일 변수 A/B를 수행할 수 있습니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
