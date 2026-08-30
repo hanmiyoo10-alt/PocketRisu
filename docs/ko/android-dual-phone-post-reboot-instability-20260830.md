@@ -47,4 +47,20 @@
 
 다음 단계는 자동복구 테스트 실패를 이미 확정한 상태에서 서버폰 Termux를 열어 즉시 runit 전체 서비스가 같은 짧은 age로 새로 시작되는지, supervisor/proc 상태와 관련 파일을 INSPECT_ONLY로 기록하는 것입니다. 재시작/수정은 그 뒤에만 진행합니다.
 
+## Termux 수동 실행 직후: runit 전체 재기동 확인
+
+완전 단절 뒤 서버폰 Termux를 열고 즉시 INSPECT_ONLY를 수행했습니다.
+
+- `sshd`, `pocketrisu`, `local-usage-runtime-manager`, `local-usage-runtime-engine`, `llmgateway-bridge`가 모두 **약 2초 age**로 동시에 새로 올라옴
+- `runsvdir` PID는 `20616`
+- `/proc/20616/status`에서 `PPid: 1`, 상태 sleeping, RSS 약 3.2 MiB
+- `/proc/20616/oom_score`는 `666`
+- `/proc/20616/oom_score_adj`는 `0`
+- `service-daemon` 바이너리는 존재하며, 현재 CLI는 `status` 단독 조회가 아니라 `{start|stop|restart}` 인자를 요구하는 형태
+- Termux 권한 범위에서 `dumpsys power` wake-lock 관련 출력은 얻지 못함
+
+이 패턴은 `sshd` 단독 종료와 맞지 않습니다. **Termux의 runit supervisor와 그 아래 서비스 묶음 전체가 백그라운드에서 사라졌다가, Termux shell을 다시 열면서 `$PREFIX/etc/profile.d/start-services.sh`의 `service-daemon start` 경로로 함께 재기동되는 현상**과 일치합니다.
+
+따라서 현재 장애 범위는 PocketRisu/bridge 개별 코드보다 상위의 **서버폰 Termux background process 생존성**으로 좁혀집니다. 다만 wake lock은 CPU suspend 방지와 process 생존 보장이 동일하지 않으므로, 이 결과만으로 permanent wake lock을 정답으로 복구하지 않습니다. 다음 단계는 현재 설정을 보존한 채 짧은 A/B로 wake lock 유무에 따른 runit/SSH 생존 차이를 확인한 뒤, 필요하면 Android/Termux foreground 유지 방식과 함께 최소 전력 비용의 영구 조치를 결정합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
