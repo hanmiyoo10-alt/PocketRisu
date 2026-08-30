@@ -105,10 +105,43 @@ rc=0
 
 그 이후 `core`, `engine`, direct SSH 및 서버 서비스 상태 블록은 실행 완료되지 않았으므로 이 시도는 **90분 soak 판정에 사용하지 않습니다.** 또한 위 `737s/744s`는 메인 tunnel 프로세스 age이며 wake-lock 또는 boot 경과시간으로 해석하지 않습니다.
 
-현재 shell은 `>` continuation prompt에서 사용자가 Ctrl+C로 취소한 뒤, URL linkification을 피한 단순화된 검사 블록으로 다시 확인해야 합니다.
+## 약 100분 instrumented boot soak 최종 결과: PASS
 
-## 다음 검증
+단순화한 검사 블록으로 `2026-08-30T22:57:48~49+0900`에 다시 확인했습니다. `post_core_wait=2026-08-30T21:17:43+0900` 기준 약 `6005초`, 즉 약 `100분` 경과 시점입니다.
 
-서버폰 Termux를 직접 열거나 `termux-wake-unlock`을 실행하지 않고 상태를 그대로 보존합니다. `post_core_wait` 기준 `2026-08-30T21:17:43+0900`에서 최소 90분 이후 메인폰에서 tunnel 상태, forwarded core/engine, direct SSH를 다시 확인합니다. 90분 기준점은 약 `22:47:43 +0900`입니다.
+메인폰:
+
+- `pocketrisu-ssh-tunnel`: PID `24548`, age `6019s`
+- `pocketrisu-notify-tunnel`: PID `24411`, age `6026s`
+- forwarded PocketRisu core: HTTP `200`
+- forwarded local-usage engine: HTTP `200`
+
+메인폰 direct SSH를 통한 서버폰 상태:
+
+- sshd PID `12440`, age `6020s`
+- pocketrisu PID `12448`, age `6020s`
+- local-usage-runtime-engine PID `12449`, age `6020s`
+- llmgateway-bridge PID `12438`, age `6020s`
+- local-usage-runtime-manager PID `6385`, age `1963s`
+- `~/.termux/boot-wakelock-last`: `phase=post_core_wait`, `rc=0`, `time=2026-08-30T21:17:43+0900`
+- server core HTTP `200`
+- server engine HTTP `200`
+- direct SSH: `ssh_rc=0`, `CLASS=DIRECT_SSH_OK`
+
+따라서 이번 목표였던 **whole Termux/runit/sshd/backend 생존 기준에서는 약 100분 soak PASS**입니다. 서버폰 Termux UI를 직접 열지 않은 상태에서 sshd, PocketRisu, engine, bridge가 부팅 직후부터 약 100분 연속 생존했고, core/engine 및 direct SSH도 정상입니다.
+
+다만 `local-usage-runtime-manager`만 초기 PID `12434`에서 `6385`로 바뀌어 중간 재시작이 있었습니다. 이는 whole Termux/runit 소실 패턴과는 다릅니다. engine/bridge/sshd/PocketRisu는 같은 PID로 계속 생존했고 health도 정상입니다. 과거에 확인한 manager 자체의 runit 재시작 경로와 관련될 가능성은 있으나, 이번 기록에서는 원인을 확정하지 않고 별도 로그 확인 대상으로 남깁니다.
+
+## 현재 결론
+
+- 계측/2회 wake-lock 요청 boot script는 실제 reboot에서 실행됨
+- `boot_initial rc=0`
+- core 준비 성공: `core_ready=1`, `iterations=6`
+- `post_core_wait rc=0`
+- 재부팅 직후 전체 remote-path 자동복구 PASS
+- `post_core_wait` 기준 약 100분 뒤에도 whole backend 생존 PASS
+- 이전의 whole Termux/runit/sshd 소실 패턴은 이번 약 100분 soak에서는 재현되지 않음
+- 단, Android wake lock의 held 상태 자체를 직접 읽은 것은 아니므로 "wake lock이 100분 내내 held였다"고 단정하지 않음
+- manager 단독 재시작 1회는 별도 원인 확인 필요
 
 정확한 Tailscale 주소, 인증정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
