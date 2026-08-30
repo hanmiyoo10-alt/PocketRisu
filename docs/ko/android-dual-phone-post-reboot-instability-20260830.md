@@ -63,4 +63,15 @@
 
 따라서 현재 장애 범위는 PocketRisu/bridge 개별 코드보다 상위의 **서버폰 Termux background process 생존성**으로 좁혀집니다. 다만 wake lock은 CPU suspend 방지와 process 생존 보장이 동일하지 않으므로, 이 결과만으로 permanent wake lock을 정답으로 복구하지 않습니다. 다음 단계는 현재 설정을 보존한 채 짧은 A/B로 wake lock 유무에 따른 runit/SSH 생존 차이를 확인한 뒤, 필요하면 Android/Termux foreground 유지 방식과 함께 최소 전력 비용의 영구 조치를 결정합니다.
 
+## 임시 wake-lock A/B 시작 기준점
+
+서버폰에서 파일이나 서비스 정의를 수정하지 않고 `termux-wake-lock`만 임시로 실행해 A/B 테스트를 시작했습니다.
+
+- `termux-wake-lock` 종료코드: `0`
+- `runsvdir` PID: `20616`으로 직전 기준점과 동일
+- `sshd`, `pocketrisu`, `local-usage-runtime-manager`, `local-usage-runtime-engine`, `llmgateway-bridge` 모두 동일 PID를 유지하며 약 129초 age
+- 즉 wake lock을 켜는 행위 자체가 runit/service 재시작을 유발하지 않았고, 깨끗한 A/B 시작 기준점이 확보됨
+
+아직 wake lock이 원인 해결책이라는 결론은 내리지 않습니다. 다음 단계는 서버폰 Termux를 홈 버튼으로만 백그라운드에 둔 상태에서 메인폰에서 일정 시간 SSH tunnel/core/engine 생존을 관찰하고, 이전처럼 8022가 닫히는지 비교합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
