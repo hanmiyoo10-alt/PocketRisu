@@ -101,4 +101,12 @@ wake lock을 해제한 뒤에도 `Disable child process restrictions=ON` 조건�
 
 다음 단계는 추가 설정 변경 없이 같은 조건을 몇 시간 더 유지하면서 화면-off와 평소 실사용을 포함해 관찰하는 것입니다. 이후에도 안정적이면 마지막 검증으로 서버폰 재부팅 후 자동복구와 wake lock 없는 장기 생존을 확인합니다. 이 두 단계까지 통과하면 `Disable child process restrictions=ON`을 서버폰의 wake lock 대체 수단으로 채택할 수 있습니다.
 
+## 재부팅 직후 UI 종료 관찰 — 원격 경로는 사용 가능
+
+서버폰을 재부팅한 뒤 Termux UI가 잠시 보였다가 갑자기 사라지는 현상이 관찰됐습니다. 그러나 사용자는 같은 시점에도 메인폰에서 PocketRisu를 계속 사용할 수 있다고 보고했습니다.
+
+이 관찰만으로 Termux 전체 프로세스가 종료됐다고 해석하면 안 됩니다. Android에서는 Activity/UI가 닫히거나 사라져도 별도의 background service/runit child process는 계속 살아 있을 수 있습니다. 오히려 PocketRisu가 실제로 계속 사용 가능한 상태라면 서버 쪽 `sshd`/PocketRisu 경로가 살아 있을 가능성이 높습니다.
+
+따라서 현 시점 판정은 **재부팅 후 UI disappearance가 있었지만 backend survival 가능성이 높음 — 원격 검증 대기**입니다. 서버폰 Termux를 다시 열어 상태를 오염시키지 않고, 메인폰에서 supervised SSH/notify tunnel 상태와 forwarded core/engine health를 먼저 INSPECT_ONLY로 확인합니다. 이 결과가 정상이라면 이번 재부팅은 `Disable child process restrictions=ON + 장기 wake lock 없음` 조건에서 UI와 backend 생명주기가 분리되어 backend가 살아남은 중요한 성공 신호로 기록합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
