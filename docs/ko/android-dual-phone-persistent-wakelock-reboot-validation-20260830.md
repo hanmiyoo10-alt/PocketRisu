@@ -98,4 +98,34 @@
 
 다음 단계에서는 실패 증거가 충분히 보존되었으므로 서버폰 Termux를 직접 열어, 열자마자 runit/sshd/PocketRisu/local-usage 서비스들이 다시 낮은 age로 동시 재구성되는지 확인합니다. 그 뒤에야 boot-acquired wake lock의 실제 유지 여부와 수동 wake lock 안정성 차이를 분리합니다.
 
+## Termux 재오픈 후 전체 service stack 재구성 재확인
+
+실패 상태 보존 후 서버폰 Termux를 직접 열었습니다. 직후 `runsvdir` PID는 `27578`이었고, `sshd`, `pocketrisu`, `local-usage-runtime-manager`, `local-usage-runtime-engine`, `llmgateway-bridge`가 모두 약 `1s` age로 동시에 올라왔습니다. 따라서 이번 soak 실패도 다시 **Termux/runit 서비스 그룹 전체가 사라졌다가 Termux UI를 여는 순간 재구성되는 패턴**으로 확인했습니다.
+
+동시에 다음도 확인했습니다.
+
+- boot script SHA-256은 여전히 `f54c9bb1b68a6d41a05ff257f5adfdf71a6c40b069f8ccd0ef3a0e10c9f09004`
+- boot script에는 `termux-wake-lock`만 남아 있고 `termux-wake-unlock`/trap은 없음
+- boot probe 파일은 `2026-08-30 18:05:27 +0900`에 갱신되어 실제 Termux:Boot 실행 자체는 확인됨
+
+따라서 boot script 미실행이나 파일 롤백으로 설명할 수 없습니다.
+
+## wake lock 명령 구현 검사
+
+`termux-wake-lock`은 바이너리가 아니라 다음 Android service 호출을 수행하는 짧은 shell wrapper임을 확인했습니다.
+
+- `/system/bin/am startservice`
+- action: `com.termux.service_wake_lock`
+- component: `com.termux/com.termux.app.TermuxService`
+
+현재 boot script는 이 wrapper의 stdout/stderr를 버리고 `|| true`로 종료 상태도 무시하므로, 부팅 시 wake lock 요청이 실제 성공했는지 증거가 남지 않습니다. Termux PATH에서는 `dumpsys`가 발견되지 않았으나 `/system/bin/dumpsys` 자체 존재 여부는 후속 검사 대상으로 남겼습니다.
+
+## 수동 wake lock direct request 첫 시도: 명령 미반환
+
+Termux 재오픈 후 서비스 5개가 모두 동일 PID로 약 `355s` 연속 run인 기준점에서 `/system/bin/am`, `/system/bin/dumpsys`, `/system/bin/cmd`가 모두 executable임을 확인했습니다.
+
+그 뒤 boot wrapper와 동일 의미의 `/system/bin/am startservice --user ... -a com.termux.service_wake_lock com.termux/com.termux.app.TermuxService`를 stdout/stderr 보존 상태로 직접 실행했으나, 제공된 출력에서는 해당 명령 이후 shell prompt가 아직 복귀하지 않았습니다. 따라서 이 시점에는 `wake_request_rc`가 출력되지 않았고 **수동 wake lock 요청의 성공/실패는 판정하지 않습니다.**
+
+예상과 다른 장시간 미반환이므로 다른 변경이나 재부팅은 하지 않고, 해당 `am startservice` 호출을 중단한 뒤 임시 출력과 `/system/bin/dumpsys power`로 실제 service/wake-lock 상태를 읽는 단계로 전환합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
