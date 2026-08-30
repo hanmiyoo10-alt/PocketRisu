@@ -30,4 +30,21 @@
 
 이 결과로 `Connection refused`이면 서버 sshd/Termux service 부재 쪽, timeout/no-route이면 Tailscale/네트워크 경로 쪽, direct SSH 성공인데 localhost API만 실패하면 메인 tunnel 또는 서버 PocketRisu/bridge 쪽으로 분리합니다.
 
+## 완전 단절 시 direct SSH 결과: 서버 sshd 부재 확정
+
+완전 단절 상태를 보존한 채 메인폰에서 즉시 확인했습니다.
+
+- `pocketrisu-ssh-tunnel`은 age 약 1초로 runit 재시작 루프 상태
+- localhost core health HTTP `000`
+- localhost bridge engine health HTTP `000`
+- tunnel과 동일한 서버 대상의 direct SSH 8022는 종료코드 255
+- direct SSH 오류는 `Connection refused`
+- timeout, no-route, network-unreachable 유형은 아님
+
+따라서 이번 장기 불안정의 실제 실패층은 **메인 SSH tunnel 자체가 아니라 서버폰의 TCP 8022/sshd 부재**로 좁혀졌습니다. Tailscale 경로는 서버 측에서 즉시 연결 거부를 반환할 정도로 도달 가능한 상태로 판단합니다.
+
+현재 가장 유력한 범위는 서버폰에서 시간이 지난 뒤 `sshd` 또는 더 상위의 Termux/runit supervisor가 내려가는 현상입니다. 아직 `sshd` 단독 종료와 `runsvdir` 전체 종료를 구분하지 않았으므로, 서버폰 Termux를 열기 전에 원인을 단정하지 않습니다. GPT 알림 역시 직접 원인으로 취급하지 않으며, 해당 작업이 Termux/process control을 건드리는지 별도 확인 전까지 분리합니다.
+
+다음 단계는 자동복구 테스트 실패를 이미 확정한 상태에서 서버폰 Termux를 열어 즉시 runit 전체 서비스가 같은 짧은 age로 새로 시작되는지, supervisor/proc 상태와 관련 파일을 INSPECT_ONLY로 기록하는 것입니다. 재시작/수정은 그 뒤에만 진행합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
