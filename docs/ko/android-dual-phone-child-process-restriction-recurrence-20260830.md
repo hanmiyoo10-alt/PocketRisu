@@ -113,4 +113,24 @@ PocketRisu의 supervise PID는 `26189`였고 실제 프로세스는 `node server
 
 현재 운영 상태는 **wake lock ON + 서버 core/bridge 정상**입니다. 다음 변경은 바로 boot script를 수정하지 않고, 먼저 현재 boot script에서 `termux-wake-lock`과 `termux-wake-unlock`이 어떤 조건/경로로 배치되어 있는지 INSPECT_ONLY로 재확인한 뒤 백업 → 최소 수정 → 검증 순서로 진행합니다.
 
+## persistent wake lock 전환 후 local-usage pair 재시작 관찰
+
+persistent wake lock boot script 패치 후 현재 런타임을 재시작하지 않은 상태에서 확인한 결과, `runsvdir`, `sshd`, `pocketrisu`, `llmgateway-bridge`는 기존 PID/age를 계속 유지했고 core/engine health도 HTTP 200이었습니다. 다만 `local-usage-runtime-manager`와 `local-usage-runtime-engine`만 중간에 새 PID로 교체되어 있었습니다.
+
+추가 INSPECT_ONLY 결과:
+
+- manager: PID `27611`, age 약 `547s`
+- engine: PID `27654`, age 약 `543s`
+- 두 프로세스는 약 4초 차이로 다시 올라옴
+- manager run SHA-256: `43efff83c20907a0fe4c9223f2d1be575df675a595a92a4822ecf053d8c629ec`
+- engine run SHA-256: `58b7965f3b14af15e564032534c8817a3856325a381c8a756df81baa94c3a178`
+- manager run은 `bridge-manager.cjs`를 Node로 exec
+- engine run은 `bridge-engine.mjs`를 Node로 exec
+- 두 서비스 디렉터리 모두 서비스별 `log` 엔트리가 없음
+- `$PREFIX/var/log`에서도 local-usage manager/engine과 매칭되는 regular log 파일을 찾지 못함
+
+`ps`가 프로세스 시작 시각을 1970년으로 표시한 것은 이 Android/Termux 환경의 시간 표기 한계로 보며 판정에 사용하지 않습니다. 서비스 생존/재시작 시점은 `sv status` age를 우선합니다.
+
+현재 증거로는 Termux/runit 전체가 재구성된 것이 아니라 **local-usage manager/engine pair만 부분 재시작된 것**까지는 확정할 수 있습니다. 그러나 로그가 없으므로 정상적인 manager 주도 engine 재생성/재시작인지, manager/engine 프로세스 종료 후 runit 자동재기동인지 원인은 아직 확정하지 않습니다. 따라서 서버 재부팅 검증은 잠시 보류하고, 다음 단계는 manager source에서 engine sync/regeneration/restart/exit 경로를 읽기 전용으로 확인하는 것입니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
