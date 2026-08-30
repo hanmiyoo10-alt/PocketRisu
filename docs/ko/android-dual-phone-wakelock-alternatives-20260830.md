@@ -93,4 +93,12 @@ root 환경에서 Android init/Magisk service 등으로 Termux UID 밖의 더 �
 
 따라서 현재 A/B 조건은 **`Disable child process restrictions=ON + wake lock=OFF`**로 깨끗하게 시작됐습니다. 서버폰 Termux는 홈으로 백그라운드에 두고 최근 앱에서 제거하지 않으며, 평소 메인폰 PocketRisu 실사용 중 이전과 같은 완전 단절이 재현되는지 관찰합니다. 장애가 다시 발생하면 서버폰 Termux를 열기 전에 메인폰에서 direct SSH 8022 결과를 먼저 확보해 이전 `Connection refused` 패턴과 비교합니다.
 
+## 1차 운영 판정: provisional pass
+
+wake lock을 해제한 뒤에도 `Disable child process restrictions=ON` 조건에서 사용자가 계속 PocketRisu를 정상 실사용하고 있으며, 이전에 wake lock이 없을 때 비교적 짧은 시간 안에 재현되던 완전 단절이 현재까지 다시 나타나지 않았습니다.
+
+따라서 현 시점에서는 이 조합을 **PROVISIONAL PASS**로 판정합니다. 다만 정확한 장시간 soak와 재부팅 후 자동복구/장기 생존 검증이 아직 남아 있으므로 permanent fix로 확정하지 않습니다.
+
+다음 단계는 추가 설정 변경 없이 같은 조건을 몇 시간 더 유지하면서 화면-off와 평소 실사용을 포함해 관찰하는 것입니다. 이후에도 안정적이면 마지막 검증으로 서버폰 재부팅 후 자동복구와 wake lock 없는 장기 생존을 확인합니다. 이 두 단계까지 통과하면 `Disable child process restrictions=ON`을 서버폰의 wake lock 대체 수단으로 채택할 수 있습니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
