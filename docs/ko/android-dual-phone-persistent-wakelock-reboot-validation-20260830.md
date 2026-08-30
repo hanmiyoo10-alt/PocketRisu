@@ -35,4 +35,17 @@
 
 이 시도는 post-reboot backend 성공/실패 증거로 사용하지 않습니다. 서버폰 Termux는 계속 열지 않아 현재 상태를 보존하고, 다음 메인폰 검사는 tunnel status, forwarded core/engine health, direct SSH 8022 결과를 한 블록에서 반드시 출력하도록 다시 수행합니다.
 
+## post-reboot 메인 원격 경로 확인: PASS
+
+서버폰 Termux UI를 다시 열지 않은 상태에서 메인폰에서 재확인했습니다.
+
+- `pocketrisu-ssh-tunnel`: PID `17147`, age 약 `629s`
+- `pocketrisu-notify-tunnel`: PID `17145`, age 약 `630s`
+- forwarded PocketRisu core: HTTP `200`
+- forwarded local-usage engine: HTTP `200`
+
+따라서 서버폰 재부팅 후 Termux UI가 화면에서 사라진 상태에서도 최소 약 10분 동안 메인폰의 SSH tunnel과 PocketRisu/local-usage 원격 경로가 정상적으로 유지되었습니다. 이 시점의 **boot autorecovery 및 원격 backend 경로는 PASS**로 판정합니다.
+
+다만 같은 블록의 direct SSH 8022 명령은 사용자가 붙여넣은 출력이 `ssh ... true >/dev/null 2>"$ERR"` 실행 부분에서 끝나 종료코드/분류가 아직 보이지 않습니다. 따라서 direct SSH 자체의 최종 분류는 보류합니다. 또한 이 원격 PASS만으로 Android wake lock이 실제로 획득·유지 중임을 독립적으로 직접 증명한 것은 아니며, persistent wake lock의 장기 안정성 판정에는 더 긴 soak가 필요합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
