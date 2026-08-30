@@ -128,4 +128,27 @@ Termux 재오픈 후 서비스 5개가 모두 동일 PID로 약 `355s` 연속 ru
 
 예상과 다른 장시간 미반환이므로 다른 변경이나 재부팅은 하지 않고, 해당 `am startservice` 호출을 중단한 뒤 임시 출력과 `/system/bin/dumpsys power`로 실제 service/wake-lock 상태를 읽는 단계로 전환합니다.
 
+## 수동 wake lock 요청 재판정 및 dumpsys 권한 한계
+
+후속 출력으로 직전 `/system/bin/am startservice` 호출이 실제로는 정상 반환했음을 확인했습니다.
+
+- `previous_rc=0`
+- 저장된 출력: `Starting service: Intent { act=com.termux.service_wake_lock cmp=com.termux/.app.TermuxService }`
+
+따라서 수동 wake lock service Intent는 ActivityManager에 정상 접수되었습니다. 같은 시점에 서비스 5개는 기존 PID를 유지한 채 age 약 `500s`까지 연속 증가했고 core/engine은 모두 HTTP 200이었습니다. 즉 수동 wake lock 요청 자체가 runit 서비스 재시작을 일으키지는 않았습니다.
+
+`/system/bin/dumpsys power`와 `/system/bin/dumpsys activity services com.termux`를 직접 실행한 결과 둘 다 명령 종료코드는 `0`이었지만 실제 내용은 각각 한 줄의 `Permission Denial`뿐이었습니다.
+
+- PowerManagerService dump: Termux UID `10034`에 `android.permission.DUMP` 권한 없음
+- ActivityManager service dump: 동일하게 `android.permission.DUMP` 권한 없음
+
+따라서 root/ADB 권한이 없는 현재 서버폰 Termux 세션에서는 `dumpsys`로 실제 wake lock held 여부나 TermuxService 내부 상태를 직접 판정할 수 없습니다. 이전에 grep 결과가 비어 있었던 것은 wake lock 부재의 증거가 아니라 dump 권한 차단 때문입니다.
+
+Termux upstream `TermuxService` 구현도 확인했습니다. `ACTION_WAKE_LOCK`을 받으면 `PowerManager.PARTIAL_WAKE_LOCK`과 Wi-Fi lock을 획득하고, 이미 `mWakeLock`이 있으면 중복 획득을 무시합니다. `TermuxService.onDestroy()`에서는 해당 lock을 release하며 서비스 restart policy는 `START_NOT_STICKY`입니다. 따라서 향후 판정은 두 가능성을 분리해야 합니다.
+
+1. 부팅 시 `termux-wake-lock` service Intent 자체가 실패하거나 너무 이른 타이밍에 실행됨
+2. 부팅 시 lock은 정상 획득했지만 이후 TermuxService/process가 Android에 의해 종료되면서 lock도 같이 사라짐
+
+현재 수동 요청은 정상 접수되었고 서버 runtime은 정상 유지 중이지만, 실제 wake lock held 상태를 직접 읽을 권한은 없습니다. 다음 단계는 기존 부팅 시점의 Termux/ActivityManager log 흔적을 읽을 수 있는지 INSPECT_ONLY로 확인해 boot-time request 성공/실패 근거를 찾는 것입니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
