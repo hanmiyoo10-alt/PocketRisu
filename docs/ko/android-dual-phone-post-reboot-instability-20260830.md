@@ -74,4 +74,12 @@
 
 아직 wake lock이 원인 해결책이라는 결론은 내리지 않습니다. 다음 단계는 서버폰 Termux를 홈 버튼으로만 백그라운드에 둔 상태에서 메인폰에서 일정 시간 SSH tunnel/core/engine 생존을 관찰하고, 이전처럼 8022가 닫히는지 비교합니다.
 
+## 첫 15분 wake-lock 관찰: 판정 보류
+
+15분 관찰 명령은 표면상 `core=200`, `engine=200`을 90개 표본 모두에서 유지해 `WAKELOCK_AB_15MIN_PASS`를 출력했습니다. 그러나 시작 시점부터 `pocketrisu-ssh-tunnel/run` 경로가 존재하지 않았고, tunnel PID도 전체 구간에서 `NONE`이었습니다.
+
+따라서 이 실행은 **메인폰의 실제 supervised SSH tunnel을 감시했다고 볼 수 없으며 wake-lock A/B의 유효한 PASS로 채택하지 않습니다.** 특히 실행 위치가 서버폰이었다면 로컬 6001/39117 health 200은 서버 프로세스 자체가 살아 있었음을 보여줄 뿐, 메인폰→서버폰 원격 경로 생존성을 검증하지 못합니다. 또한 같은 Termux 세션에서 15분 명령을 실행했다면 서버폰 Termux를 실제 백그라운드 유휴 상태로 둔 테스트도 아닙니다.
+
+예상과 다른 출력이므로 여기서 결론을 멈추고, 다음 단계에서는 먼저 실행 단말과 `pocketrisu-ssh-tunnel` service path 존재 여부를 INSPECT_ONLY로 확인한 뒤 유효한 A/B를 다시 구성합니다. 현재 임시 wake lock은 해제하지 않고 유지합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
