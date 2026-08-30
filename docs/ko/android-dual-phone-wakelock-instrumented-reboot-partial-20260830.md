@@ -171,11 +171,38 @@ rc=0
 
 `supervise/` 시각과 현재 PID age는 manager가 약 22:25 전후에 runit에 의해 다시 올라온 정황과 맞지만, 이 시각 정보만으로 실제 종료 원인이나 어떤 코드 경로가 `process.exit`을 호출했는지는 확정하지 않습니다.
 
-코드 힌트상 다음 구간을 좁게 읽어 의도적 self-restart 경로와 오류 종료 경로를 분리해야 합니다.
+## manager restart/exit 코드 경로 inspection
 
-- 약 230~295: `process.exit`, `LUD_MANAGER_RESTART_MODE`, restart 관련 분기
-- 약 700~765: restart 관련 분기, console output, `process.exit`
-- 필요한 경우 SIGTERM 처리 구간도 별도 확인
+현재 `bridge-manager.cjs` SHA256은 `bbcbb6b4ae2dfe6a27ec4282da8147d3e5a693586a1648211d90a107713f0801`입니다.
+
+좁은 소스 inspection 결과 `scheduleRestart()`는 150ms timer 뒤 다음처럼 동작합니다.
+
+- `RESTART_MODE === 'runit'`이면 `process.exit(0)`으로 자기 프로세스를 정상 종료
+- runit 모드가 아니면 새 manager 프로세스를 detached/manual mode로 띄우고 기존 프로세스를 `process.exit(0)`
+
+따라서 manager PID 변경은 비정상 crash만으로 설명되는 구조가 아니며, **의도적인 self-restart가 정상 설계에 포함**되어 있습니다.
+
+`send(..., restart=true)`가 응답 완료 뒤 `scheduleRestart()`를 호출하며 확인된 진입점은 다음과 같습니다.
+
+- `POST /restart`: 항상 `{ok:true,restart:true}` 응답 후 self-restart
+- `POST /sync`: `syncSelf()`가 실제 manager update를 적용해 `restartRequired=true`를 반환한 경우 self-restart
+- `POST /rollback`: rollback 성공으로 `restartRequired=true`인 경우 self-restart
+
+반면 request handler 내부 일반 예외는 HTTP 500을 반환하고 manager 자체를 종료하지 않습니다. `server.on('error')`는 `process.exitCode = 1`을 설정하지만, 이번에 과거 stdout/stderr가 남지 않았으므로 이것이 당시 PID 변경 원인이었다고 단정할 수 없습니다.
+
+또한 engine adoption 구간의 `SIGTERM`은 manager 자신이 아니라 발견된 legacy engine candidate PID를 종료하는 코드입니다. 따라서 이 구간을 manager 단독 재시작 원인으로 해석하지 않습니다.
+
+현재 manager PID `6385`는 inspection 시점에도 계속 run 중이고 direct SSH는 `ssh_rc=0`입니다.
+
+### 현재 manager 재시작 판정
+
+- manager 단독 PID 변경은 확인됨
+- runit 기반 의도적 self-restart 경로가 실제 코드에 존재함
+- `/restart`, successful self-update `/sync`, successful `/rollback`이 명시적인 정상 self-restart 진입점
+- 과거 stdout/stderr는 `/dev/null`이라 당시 정확한 호출 경로는 직접 복원 불가
+- 따라서 PID `12434 → 6385`를 crash로 단정하지 않음
+- 반대로 정상 self-restart였다고도 아직 확정하지 않음
+- 다음 단계는 source/backup 파일의 mtime, ctime, SHA를 비교해 약 22:25에 실제 self-update/rollback 파일 교체가 있었는지 확인하는 것
 
 whole Termux/runit 소실과 manager 단독 runit 재기동은 계속 분리해 진단합니다.
 
@@ -191,6 +218,7 @@ whole Termux/runit 소실과 manager 단독 runit 재기동은 계속 분리해 
 - 단, Android wake lock의 held 상태 자체를 직접 읽은 것은 아니므로 "wake lock이 100분 내내 held였다"고 단정하지 않음
 - manager 단독 재시작 1회는 확인됨
 - manager stdout/stderr 로그는 `/dev/null`이라 과거 종료 원인을 직접 복원할 수 없음
-- manager 재시작 원인은 아직 미확정이며 코드의 좁은 restart/exit 경로 inspection이 다음 단계
+- manager 코드에는 runit용 정상 self-restart 경로가 명시적으로 존재함
+- 당시 manager 재시작의 실제 진입점은 아직 미확정
 
 정확한 Tailscale 주소, 인증정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
