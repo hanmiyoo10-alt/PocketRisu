@@ -94,6 +94,19 @@ rc=0
 5. 따라서 "boot script 자체가 실행되지 않았다" 또는 "두 wake-lock request가 ActivityManager에 전달되지 않았다"는 가설은 이번 reboot에서는 배제할 수 있습니다.
 6. 다만 `rc=0`은 service start 요청 전달 성공의 증거이지, Android wake lock이 이후 장시간 계속 held 상태라는 직접 증명은 아닙니다. 이 부분은 장기 soak에서 backend 생존 여부로 계속 검증해야 합니다.
 
+## 90분 soak 검사 시도 중 붙여넣기 오류
+
+90분 soak 확인용 메인폰 명령을 붙여넣는 과정에서 health 출력 줄의 URL 부분이 중복 삽입되어 shell이 `>` continuation prompt 상태에 들어갔습니다.
+
+이 시도에서 유효하게 실행된 출력은 다음 tunnel 상태까지입니다.
+
+- `pocketrisu-ssh-tunnel`: PID `24548`, age `737s`
+- `pocketrisu-notify-tunnel`: PID `24411`, age `744s`
+
+그 이후 `core`, `engine`, direct SSH 및 서버 서비스 상태 블록은 실행 완료되지 않았으므로 이 시도는 **90분 soak 판정에 사용하지 않습니다.** 또한 위 `737s/744s`는 메인 tunnel 프로세스 age이며 wake-lock 또는 boot 경과시간으로 해석하지 않습니다.
+
+현재 shell은 `>` continuation prompt에서 사용자가 Ctrl+C로 취소한 뒤, URL linkification을 피한 단순화된 검사 블록으로 다시 확인해야 합니다.
+
 ## 다음 검증
 
 서버폰 Termux를 직접 열거나 `termux-wake-unlock`을 실행하지 않고 상태를 그대로 보존합니다. `post_core_wait` 기준 `2026-08-30T21:17:43+0900`에서 최소 90분 이후 메인폰에서 tunnel 상태, forwarded core/engine, direct SSH를 다시 확인합니다. 90분 기준점은 약 `22:47:43 +0900`입니다.
