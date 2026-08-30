@@ -70,4 +70,15 @@ root 환경에서 Android init/Magisk service 등으로 Termux UID 밖의 더 �
 
 정확한 분 단위 타이머를 두고 잰 soak는 아니므로 이 단계만으로 child-process 제한 해제가 안정성을 만들었다고 판정하지는 않습니다. 다만 **옵션 ON 자체가 현재 PocketRisu/runit/sshd 동작에 즉시 악영향을 주지 않는다는 1단계 확인은 통과**한 것으로 보고, 다음 단계에서만 wake lock을 런타임 해제하여 단일 변수 A/B를 수행할 수 있습니다.
 
+## wake lock 해제 직전 안정 기준점
+
+`Disable child process restrictions=ON` 상태에서 wake lock을 계속 유지한 채 최종 기준점을 수집했습니다.
+
+- `runsvdir` PID: `20616`
+- `sshd`, `pocketrisu`, `local-usage-runtime-manager`, `local-usage-runtime-engine`, `llmgateway-bridge` 모두 약 `3639s`(약 60분 39초) 동안 동일 PID로 안정 run
+- PocketRisu core health HTTP 200
+- local bridge engine health HTTP 200
+
+따라서 옵션 ON + wake lock ON 조건은 최소 약 1시간 동안 안정적으로 유지된 것으로 확인했습니다. 다음 단계에서는 파일을 수정하지 않고 런타임 wake lock만 해제하여 `Disable child process restrictions=ON + wake lock=OFF` 조건을 만들고, 실사용/백그라운드 생존성을 비교합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
