@@ -79,18 +79,23 @@
 - forwarded PocketRisu core: HTTP `000`
 - forwarded local-usage engine: HTTP `000`
 - direct SSH 8022 시도 종료코드: `255`
-- 이 direct SSH 시도에서는 stderr를 버렸으므로 `Connection refused` / timeout / route / auth 유형은 아직 분류하지 않음
 
-따라서 **persistent wake lock boot script를 적용한 상태에서도 장기 soak 중 원격 backend가 다시 완전히 끊겼습니다.** 재부팅 직후 자동복구 PASS 자체는 유효하지만, 그것이 장기 background survival을 보장하지는 못했습니다.
+후속 분류용 direct SSH를 stderr 보존 상태로 다시 수행한 결과:
 
-현재 단계에서 확정 가능한 것은 다음과 같습니다.
+- `ssh_rc=255`
+- `CLASS=CONNECTION_REFUSED`
 
-1. 재부팅 직후에는 persistent wake lock 구성으로 sshd/core/engine이 정상 자동복구됨
-2. 이후 일정 시간이 지나면 메인 SSH/notify tunnel이 다시 재시작 루프에 빠짐
+따라서 이번 실패는 timeout/route 문제와 분리됩니다. 메인폰에서 서버폰의 네트워크 endpoint에는 도달했지만 port `8022`에서 sshd가 listen 중이지 않은 상태입니다. 이는 과거 wake-lock-free 장기 실패 때 관찰된 패턴과 동일합니다.
+
+현재 확정 가능한 것은 다음과 같습니다.
+
+1. persistent wake lock용 boot script 적용 후 재부팅 직후에는 sshd/core/engine이 정상 자동복구됨
+2. 이후 soak 중 메인 SSH/notify tunnel이 재시작 루프에 빠짐
 3. forwarded core/engine은 HTTP `000`
-4. direct SSH는 `rc=255`이지만 현재 출력만으로 정확한 네트워크/sshd 실패 유형은 미분류
-5. 따라서 **persistent wake lock 단독도 최종 해결책으로 확정할 수 없음**
+4. direct SSH 8022는 `Connection refused`
+5. 따라서 네트워크/Tailscale route 자체보다 서버 Termux/sshd 서비스층 소실 패턴과 더 잘 맞음
+6. 다만 boot script에서 호출한 wake lock이 장애 시점까지 실제로 유지되었는지는 독립적으로 확인하지 못했으므로, **"wake lock이 확실히 유지 중인데도 서비스층이 죽었다"고 단정하지 않음**
 
-다음 단계에서는 서버폰 Termux를 열지 않은 실패 상태를 보존한 채 메인폰에서 direct SSH stderr를 포함해 정확히 `Connection refused`인지 timeout/route인지 먼저 분류합니다. 그 결과가 확보되기 전에는 서버폰을 열어 상태를 재구성하지 않습니다.
+다음 단계에서는 실패 증거가 충분히 보존되었으므로 서버폰 Termux를 직접 열어, 열자마자 runit/sshd/PocketRisu/local-usage 서비스들이 다시 낮은 age로 동시 재구성되는지 확인합니다. 그 뒤에야 boot-acquired wake lock의 실제 유지 여부와 수동 wake lock 안정성 차이를 분리합니다.
 
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
