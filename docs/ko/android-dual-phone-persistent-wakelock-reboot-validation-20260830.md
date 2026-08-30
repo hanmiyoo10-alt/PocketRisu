@@ -29,4 +29,10 @@
 4. 원격 경로가 PASS면 서버폰 UI를 열지 않은 상태에서 boot autorecovery가 성공한 것으로 판단
 5. 원격 경로가 FAIL이면 실패 유형을 먼저 보존한 뒤 서버폰 Termux를 열지 여부를 결정
 
+## 첫 post-reboot direct SSH 시도: 결과 미출력
+
+메인폰에서 실제 tunnel destination을 사용한 direct SSH 8022 명령을 실행했으나, 사용자가 붙여넣은 블록에는 stderr를 임시 파일로 리다이렉트하는 부분까지만 포함되었고 `RC=$?`, 오류 분류, health/tunnel 상태 출력 부분이 실행되지 않았습니다. 동일한 direct SSH 명령이 두 번 실행된 뒤 프롬프트로 복귀했지만, 종료코드와 stderr 내용이 출력되지 않았으므로 **성공/Connection refused/timeout/auth 중 어느 쪽인지 판정할 수 없습니다.**
+
+이 시도는 post-reboot backend 성공/실패 증거로 사용하지 않습니다. 서버폰 Termux는 계속 열지 않아 현재 상태를 보존하고, 다음 메인폰 검사는 tunnel status, forwarded core/engine health, direct SSH 8022 결과를 한 블록에서 반드시 출력하도록 다시 수행합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
