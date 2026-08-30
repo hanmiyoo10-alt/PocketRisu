@@ -132,6 +132,26 @@ rc=0
 
 다만 `local-usage-runtime-manager`만 초기 PID `12434`에서 `6385`로 바뀌어 중간 재시작이 있었습니다. 이는 whole Termux/runit 소실 패턴과는 다릅니다. engine/bridge/sshd/PocketRisu는 같은 PID로 계속 생존했고 health도 정상입니다. 과거에 확인한 manager 자체의 runit 재시작 경로와 관련될 가능성은 있으나, 이번 기록에서는 원인을 확정하지 않고 별도 로그 확인 대상으로 남깁니다.
 
+## manager 단독 재시작 1차 inspection
+
+메인폰 direct SSH를 통해 `local-usage-runtime-manager` 서비스의 로그 경로와 run 파일을 INSPECT_ONLY로 확인했습니다.
+
+결과:
+
+- 현재 manager: PID `6385`, age 약 `2424s`
+- manager run 파일 SHA256: `43efff83c20907a0fe4c9223f2d1be575df675a595a92a4822ecf053d8c629ec`
+- run 파일은 `LUD_MANAGER_RESTART_MODE=runit`을 export
+- run 파일은 `exec "$PREFIX/bin/node" "$HOME/.local/share/local-usage-dashboard/runtime/bridge-manager.cjs"` 형태
+- 예상한 runit log 후보 3개는 모두 없음
+  - `$PREFIX/var/log/local-usage-runtime-manager/current`
+  - `$PREFIX/var/service/local-usage-runtime-manager/log/main/current`
+  - `$PREFIX/var/service/local-usage-runtime-manager/log/current`
+- direct SSH inspection 자체는 `ssh_rc=0`
+
+`$PREFIX/var/service/local-usage-runtime-manager/log`에 대해 별도 `ls -ld` 출력이 확인되지 않았고, `readlink -f`는 경로 문자열만 반환했습니다. 따라서 현재 단계에서는 manager용 runit logger가 실제 구성되어 있다고 보지 않습니다.
+
+이 결과만으로 PID `12434 → 6385` 재시작의 원인은 확정할 수 없습니다. 다음 단계에서는 현재 PID `6385`의 stdout/stderr file descriptor 대상과 manager 코드 내부의 restart/exit/log 관련 경로를 좁게 확인해야 합니다. whole Termux/runit 소실과 manager 단독 runit 재기동은 계속 분리해 진단합니다.
+
 ## 현재 결론
 
 - 계측/2회 wake-lock 요청 boot script는 실제 reboot에서 실행됨
