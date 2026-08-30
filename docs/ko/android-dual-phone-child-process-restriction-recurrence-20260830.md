@@ -51,6 +51,14 @@
 
 따라서 현재 tunnel 재시작 루프와 core/engine `000`을 분류하기 위한 다음 검사는 이 run script의 실제 destination을 메인폰 내부에서만 추출해 동일한 port `8022`로 direct SSH를 1회 시도하는 것입니다. 대상 주소는 출력 전에 마스킹하고 공개 문서에는 저장하지 않습니다.
 
+## direct SSH 분류 명령 quoting 실패
+
+첫 direct SSH 분류 명령은 `bash -lc '...'` 바깥 작은따옴표 안에 다시 `awk '...'` 작은따옴표를 중첩해 작성한 탓에 셸 파싱이 깨졌습니다.
+
+관찰된 오류에는 `unexpected EOF while looking for matching ')'`, Bash history expansion의 `event not found`, 이후 분리되어 실행된 조각 명령들의 syntax error와 `File name too long`이 포함됐습니다. 이 시도에서는 실제 `ssh`/8022 연결 검사가 실행되기 전에 명령이 붕괴했으므로 **direct SSH 결과는 없음**으로 기록합니다.
+
+따라서 이 실패를 `Connection refused`, timeout, auth failure 등 네트워크/서버 상태의 증거로 사용하지 않습니다. 다음 시도는 중첩 `bash -lc`/`awk` quoting을 제거하고, run script의 마지막 destination 줄을 단순 추출한 뒤 `nc`로 8022 TCP 상태만 분류합니다.
+
 ## 현재 진단 원칙
 
 서버폰 Termux를 다시 열면 profile의 `service-daemon start` 경로가 runit 전체를 재구성할 수 있으므로, 현재 실패 상태를 보존하기 위해 서버폰 Termux는 열지 않습니다.
