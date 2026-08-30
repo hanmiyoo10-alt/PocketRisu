@@ -98,4 +98,10 @@ inspection 시 manager는 PID `6385`로 정상 run 중이었습니다.
 
 따라서 이 manager 재시작은 wake-lock soak 실패 증거로 보지 않습니다.
 
+## 추가 안정성 체크포인트
+
+이후 동일한 file-timeline INSPECT_ONLY 명령을 다시 실행했을 때 current/backup SHA와 22:25 metadata는 그대로였고, manager는 동일 PID `6385`로 age `9110s`까지 계속 `run` 상태였습니다. 즉 22:25 self-update/runit 재기동 뒤에도 manager 자체가 장시간 안정적으로 유지되고 있습니다.
+
+사용자 결정에 따라 Discord/Web Push/GPT 응답 알림 연동 작업은 이 시점에서 보류하고, 우선 wake-lock boot 장기 생존 검증을 계속합니다.
+
 정확한 인증정보, 토큰, private endpoint는 기록하지 않습니다.
