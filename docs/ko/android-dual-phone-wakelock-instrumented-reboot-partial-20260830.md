@@ -1,4 +1,4 @@
-# Android 듀얼폰 wake-lock 계측 패치 재부팅 — 메인폰 중간 판정 (2026-08-30)
+# Android 듀얼폰 wake-lock 계측 패치 재부팅 — 검증 기록 (2026-08-30)
 
 ## 배경
 
@@ -8,22 +8,18 @@
 - PocketRisu core 준비 대기 결과(`core_ready`, `iterations`) 로깅
 - core 준비 대기 종료 뒤 `post_core_wait` wake-lock 재요청 및 rc/시각 로깅
 
-재부팅 전 wake-lock marker 파일은 존재하지 않았으므로, 다음에 생성될 marker/log는 이번 reboot에서 생긴 증거로 분리할 수 있습니다.
+재부팅 전 wake-lock marker 파일은 존재하지 않았으므로, 이번에 생성된 marker/log는 이 reboot에서 생긴 증거로 분리할 수 있습니다.
 
-## 재부팅 후 메인폰 중간 검사
+## 재부팅 후 전체 remote-path 자동복구: PASS
 
 서버폰 Termux 앱을 열지 않은 상태에서 메인폰에서 원격 경로를 검사했습니다.
 
-결과:
+초기 결과:
 
 - `pocketrisu-ssh-tunnel`: PID `24548`, age 약 `264s`
 - `pocketrisu-notify-tunnel`: PID `24411`, age 약 `271s`
 - forwarded PocketRisu core: HTTP `200`
 - forwarded local-usage engine: HTTP `200`
-
-따라서 이 시점에서 서버폰 Termux를 수동으로 열지 않았는데도 메인 터널이 재구성되었고 PocketRisu core/engine이 정상 응답하므로 **재부팅 직후 backend 자동복구는 PASS**입니다.
-
-## direct SSH 최종 분류: PASS
 
 직전 direct SSH 8022 명령의 종료코드를 바로 보존해 확인한 결과:
 
@@ -40,6 +36,66 @@
 
 즉 **wake-lock 계측/2회 요청 패치가 적용된 첫 controlled reboot에서 전체 remote-path 자동복구는 PASS**입니다.
 
-다만 이는 재부팅 직후 자동복구 성공을 의미하며, 장시간 backend 생존까지 아직 확정하지는 않습니다. 다음 단계에서는 서버폰 Termux를 열지 않은 채 메인폰 direct SSH를 이용해 `~/.termux/boot-wakelock.log`와 `~/.termux/boot-wakelock-last`를 읽어 `boot_initial`, `core_wait`, `post_core_wait` 실행 결과를 확인합니다.
+## boot wake-lock 계측 결과
+
+메인폰 direct SSH를 이용해 서버폰의 로컬 계측 파일을 읽었습니다.
+
+현재 boot script SHA256:
+
+- `cfc8f89af4f6b564a3c359a5e1afea7c69e64ab2635482c78f9dde66504865ce`
+
+boot probe:
+
+- `boot_probe_ran=1`
+- `time=2026-08-30T21:17:26+0900`
+
+`~/.termux/boot-wakelock.log`:
+
+```text
+time=2026-08-30T21:17:26+0900
+phase=boot_initial
+rc=0
+
+time=2026-08-30T21:17:43+0900
+phase=core_wait
+core_ready=1
+iterations=6
+
+time=2026-08-30T21:17:43+0900
+phase=post_core_wait
+rc=0
+```
+
+`~/.termux/boot-wakelock-last`:
+
+```text
+time=2026-08-30T21:17:43+0900
+phase=post_core_wait
+rc=0
+```
+
+같은 원격 검사 시점에서 서버 서비스 상태:
+
+- sshd PID `12440`, age 약 `574s`
+- pocketrisu PID `12448`, age 약 `574s`
+- local-usage-runtime-manager PID `12434`, age 약 `575s`
+- local-usage-runtime-engine PID `12449`, age 약 `575s`
+- llmgateway-bridge PID `12438`, age 약 `575s`
+- core HTTP `200`
+- engine HTTP `200`
+- 원격 검사 ssh 자체도 `ssh_rc=0`
+
+## 해석
+
+1. `boot_initial rc=0`이므로 부팅 직후 1차 `com.termux.service_wake_lock` service start 요청은 ActivityManager에 정상 전달되었습니다.
+2. `core_ready=1`, `iterations=6`이므로 PocketRisu core는 boot script의 대기 루프에서 약 17초 뒤 준비 상태에 도달했습니다.
+3. 준비 직후 `post_core_wait rc=0`이므로 안정화 뒤 2차 wake-lock service start 요청도 정상 전달되었습니다.
+4. 이 시점에서 서버폰 Termux UI를 직접 열지 않았는데도 sshd/PocketRisu/manager/engine/bridge가 모두 정상이고 core/engine도 HTTP 200입니다.
+5. 따라서 "boot script 자체가 실행되지 않았다" 또는 "두 wake-lock request가 ActivityManager에 전달되지 않았다"는 가설은 이번 reboot에서는 배제할 수 있습니다.
+6. 다만 `rc=0`은 service start 요청 전달 성공의 증거이지, Android wake lock이 이후 장시간 계속 held 상태라는 직접 증명은 아닙니다. 이 부분은 장기 soak에서 backend 생존 여부로 계속 검증해야 합니다.
+
+## 다음 검증
+
+서버폰 Termux를 직접 열거나 `termux-wake-unlock`을 실행하지 않고 상태를 그대로 보존합니다. `post_core_wait` 기준 `2026-08-30T21:17:43+0900`에서 최소 90분 이후 메인폰에서 tunnel 상태, forwarded core/engine, direct SSH를 다시 확인합니다. 90분 기준점은 약 `22:47:43 +0900`입니다.
 
 정확한 Tailscale 주소, 인증정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
