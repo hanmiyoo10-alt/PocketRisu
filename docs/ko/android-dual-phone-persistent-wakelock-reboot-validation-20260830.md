@@ -68,4 +68,29 @@
 
 따라서 **persistent wake lock 구성의 재부팅 직후 자동복구는 PASS 확정**으로 판정합니다. 다만 과거 wake-lock-free 구성은 재부팅 직후에는 통과하고도 시간이 지난 뒤 전체 Termux/runit 서비스 스택이 사라졌으므로, 이번 구성의 최종 안정성 판정은 장시간 soak 이후에 별도로 수행합니다.
 
+## persistent wake lock soak 재발: FAIL
+
+이후 서버폰 Termux UI를 수동으로 다시 열지 않은 채 실사용 soak를 진행했고, 메인폰에서 다시 원격 상태를 확인했습니다.
+
+결과:
+
+- `pocketrisu-ssh-tunnel`: PID `17715`, age 약 `1s` — 재시작 루프 상태
+- `pocketrisu-notify-tunnel`: PID `17550`, age 약 `8s` — 재시작 루프 상태
+- forwarded PocketRisu core: HTTP `000`
+- forwarded local-usage engine: HTTP `000`
+- direct SSH 8022 시도 종료코드: `255`
+- 이 direct SSH 시도에서는 stderr를 버렸으므로 `Connection refused` / timeout / route / auth 유형은 아직 분류하지 않음
+
+따라서 **persistent wake lock boot script를 적용한 상태에서도 장기 soak 중 원격 backend가 다시 완전히 끊겼습니다.** 재부팅 직후 자동복구 PASS 자체는 유효하지만, 그것이 장기 background survival을 보장하지는 못했습니다.
+
+현재 단계에서 확정 가능한 것은 다음과 같습니다.
+
+1. 재부팅 직후에는 persistent wake lock 구성으로 sshd/core/engine이 정상 자동복구됨
+2. 이후 일정 시간이 지나면 메인 SSH/notify tunnel이 다시 재시작 루프에 빠짐
+3. forwarded core/engine은 HTTP `000`
+4. direct SSH는 `rc=255`이지만 현재 출력만으로 정확한 네트워크/sshd 실패 유형은 미분류
+5. 따라서 **persistent wake lock 단독도 최종 해결책으로 확정할 수 없음**
+
+다음 단계에서는 서버폰 Termux를 열지 않은 실패 상태를 보존한 채 메인폰에서 direct SSH stderr를 포함해 정확히 `Connection refused`인지 timeout/route인지 먼저 분류합니다. 그 결과가 확보되기 전에는 서버폰을 열어 상태를 재구성하지 않습니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
