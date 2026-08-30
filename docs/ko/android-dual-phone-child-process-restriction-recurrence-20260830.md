@@ -94,4 +94,23 @@
 
 따라서 이 시점에는 **wake lock 획득은 성공했지만 서버 복구 완료로 판정하지 않습니다.** PocketRisu 서비스가 단순 기동 중인지, core만 별도 실패한 것인지 확인하기 위해 수정 없이 추가 INSPECT_ONLY가 필요합니다. 예상과 다른 결과이므로 boot script나 서비스 파일은 아직 변경하지 않습니다.
 
+## wake lock 복구 후 PocketRisu startup 재확인: PASS
+
+추가로 약 15초를 기다린 뒤 수정 없이 다시 확인했습니다. 실제 확인 시점에는 서비스 age가 약 `129s`까지 증가해 있었고, 다음 다섯 서비스가 모두 기존 PID를 유지한 채 연속 run 중이었습니다.
+
+- `sshd` PID `26192`
+- `pocketrisu` PID `26189`
+- `local-usage-runtime-manager` PID `26193`
+- `local-usage-runtime-engine` PID `26197`
+- `llmgateway-bridge` PID `26194`
+
+PocketRisu의 supervise PID는 `26189`였고 실제 프로세스는 `node server/node/server...` 형태로 정상 실행 중이었습니다. 로컬 health는 다음과 같이 모두 회복했습니다.
+
+- PocketRisu core: HTTP `200`
+- local-usage engine: HTTP `200`
+
+따라서 wake lock 획득 직후의 core HTTP `000`은 영구 장애가 아니라 **PocketRisu가 engine보다 늦게 준비된 startup delay**로 해석합니다. 서버폰 Termux를 열어 runit stack이 재구성된 뒤 wake lock을 획득하면, 서비스 PID 연속성을 유지한 채 core/engine이 모두 정상 상태로 회복되는 것을 확인했습니다.
+
+현재 운영 상태는 **wake lock ON + 서버 core/bridge 정상**입니다. 다음 변경은 바로 boot script를 수정하지 않고, 먼저 현재 boot script에서 `termux-wake-lock`과 `termux-wake-unlock`이 어떤 조건/경로로 배치되어 있는지 INSPECT_ONLY로 재확인한 뒤 백업 → 최소 수정 → 검증 순서로 진행합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
