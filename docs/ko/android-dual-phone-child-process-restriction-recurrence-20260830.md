@@ -34,6 +34,23 @@
 
 현 시점의 패턴은 과거 서버 sshd/Termux supervisor 소실 때와 매우 유사하지만, 아직 direct SSH 8022의 실패 유형을 확인하지 않았으므로 서버 sshd 부재를 단정하지 않습니다. 다음 단계는 서버폰 Termux를 계속 열지 않은 채 메인폰에서 실제 tunnel 설정을 이용해 direct SSH를 한 번 시도하여 `Connection refused` / timeout / auth 가능 상태를 분리하는 것입니다.
 
+## 실제 SSH tunnel 설정 확인
+
+메인폰의 `$PREFIX/var/service/pocketrisu-ssh-tunnel/run`을 INSPECT_ONLY로 확인했습니다.
+
+- run script SHA-256: `7cc637dfd366e836b8f3175e01852a70c0006e0778f347401532762b3703f1bf`
+- SSH port: `8022`
+- `BatchMode=yes`
+- `StrictHostKeyChecking=yes`
+- `ExitOnForwardFailure=yes`
+- `ConnectTimeout=10`
+- `ServerAliveInterval=30`
+- `ServerAliveCountMax=3`
+- local forwards: core `6001`, engine `39117`, generic bridge `39118`, manager `39119`
+- 서버 SSH 사용자명은 기존 서버폰 Termux UID 계정이며, 실제 대상 주소는 문서에 기록하지 않음
+
+따라서 현재 tunnel 재시작 루프와 core/engine `000`을 분류하기 위한 다음 검사는 이 run script의 실제 destination을 메인폰 내부에서만 추출해 동일한 port `8022`로 direct SSH를 1회 시도하는 것입니다. 대상 주소는 출력 전에 마스킹하고 공개 문서에는 저장하지 않습니다.
+
 ## 현재 진단 원칙
 
 서버폰 Termux를 다시 열면 profile의 `service-daemon start` 경로가 runit 전체를 재구성할 수 있으므로, 현재 실패 상태를 보존하기 위해 서버폰 Termux는 열지 않습니다.
