@@ -150,7 +150,34 @@ rc=0
 
 `$PREFIX/var/service/local-usage-runtime-manager/log`에 대해 별도 `ls -ld` 출력이 확인되지 않았고, `readlink -f`는 경로 문자열만 반환했습니다. 따라서 현재 단계에서는 manager용 runit logger가 실제 구성되어 있다고 보지 않습니다.
 
-이 결과만으로 PID `12434 → 6385` 재시작의 원인은 확정할 수 없습니다. 다음 단계에서는 현재 PID `6385`의 stdout/stderr file descriptor 대상과 manager 코드 내부의 restart/exit/log 관련 경로를 좁게 확인해야 합니다. whole Termux/runit 소실과 manager 단독 runit 재기동은 계속 분리해 진단합니다.
+## manager FD / exit-path inspection
+
+추가 INSPECT_ONLY 결과:
+
+- manager PID `6385`, age 약 `2614s`
+- service top level에는 `run`과 `supervise/`만 있고 `log`, `down`은 없음
+- `supervise/` 디렉터리 시각은 `2026-08-30 22:25` 계열로 표시됨
+- manager PID `6385`의 stdio:
+  - fd0: `/dev/null`
+  - fd1: `/dev/null`
+  - fd2: `/dev/null`
+- process status: `node-MainThread`, sleeping, PPid `12421`, Threads `7`
+- runtime 파일은 `bridge-engine.mjs`, `bridge-manager.cjs`, 기존 backup들, `engine-adopted.json`
+- manager 코드에는 `process.exit`, `restart`, `SIGTERM`, 여러 파일 쓰기 경로가 존재함
+- 현재 manager status는 계속 run
+- direct SSH inspection은 `ssh_rc=0`
+
+이 결과로 **과거 manager 종료 원인을 stdout/stderr 로그에서 복원할 수 없다는 점이 확정**되었습니다. manager service는 별도 runit logger가 없고 stdout/stderr를 `/dev/null`로 버립니다.
+
+`supervise/` 시각과 현재 PID age는 manager가 약 22:25 전후에 runit에 의해 다시 올라온 정황과 맞지만, 이 시각 정보만으로 실제 종료 원인이나 어떤 코드 경로가 `process.exit`을 호출했는지는 확정하지 않습니다.
+
+코드 힌트상 다음 구간을 좁게 읽어 의도적 self-restart 경로와 오류 종료 경로를 분리해야 합니다.
+
+- 약 230~295: `process.exit`, `LUD_MANAGER_RESTART_MODE`, restart 관련 분기
+- 약 700~765: restart 관련 분기, console output, `process.exit`
+- 필요한 경우 SIGTERM 처리 구간도 별도 확인
+
+whole Termux/runit 소실과 manager 단독 runit 재기동은 계속 분리해 진단합니다.
 
 ## 현재 결론
 
@@ -162,6 +189,8 @@ rc=0
 - `post_core_wait` 기준 약 100분 뒤에도 whole backend 생존 PASS
 - 이전의 whole Termux/runit/sshd 소실 패턴은 이번 약 100분 soak에서는 재현되지 않음
 - 단, Android wake lock의 held 상태 자체를 직접 읽은 것은 아니므로 "wake lock이 100분 내내 held였다"고 단정하지 않음
-- manager 단독 재시작 1회는 별도 원인 확인 필요
+- manager 단독 재시작 1회는 확인됨
+- manager stdout/stderr 로그는 `/dev/null`이라 과거 종료 원인을 직접 복원할 수 없음
+- manager 재시작 원인은 아직 미확정이며 코드의 좁은 restart/exit 경로 inspection이 다음 단계
 
 정확한 Tailscale 주소, 인증정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
