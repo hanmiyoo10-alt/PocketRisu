@@ -109,4 +109,17 @@ wake lock을 해제한 뒤에도 `Disable child process restrictions=ON` 조건�
 
 따라서 현 시점 판정은 **재부팅 후 UI disappearance가 있었지만 backend survival 가능성이 높음 — 원격 검증 대기**입니다. 서버폰 Termux를 다시 열어 상태를 오염시키지 않고, 메인폰에서 supervised SSH/notify tunnel 상태와 forwarded core/engine health를 먼저 INSPECT_ONLY로 확인합니다. 이 결과가 정상이라면 이번 재부팅은 `Disable child process restrictions=ON + 장기 wake lock 없음` 조건에서 UI와 backend 생명주기가 분리되어 backend가 살아남은 중요한 성공 신호로 기록합니다.
 
+## 재부팅 후 메인폰 원격 검증: PASS
+
+서버폰 Termux UI를 다시 열지 않은 상태에서 메인폰에서 원격 경로를 INSPECT_ONLY로 확인했습니다.
+
+- `pocketrisu-ssh-tunnel`: PID `29315`, 약 `426s` 연속 run
+- `pocketrisu-notify-tunnel`: PID `29288`, 약 `430s` 연속 run
+- core forwarded health: HTTP `200`
+- local bridge engine forwarded health: HTTP `200`
+
+이는 재부팅 뒤 서버폰의 Termux Activity/UI가 사라졌더라도, 서버 쪽 SSH/PocketRisu/bridge backend는 실제로 살아 있고 메인폰 tunnel이 정상 재연결되어 요청을 처리하고 있음을 보여줍니다. 이전 실패에서는 서버 8022가 `Connection refused`가 되고 core/engine이 HTTP `000`으로 떨어졌으므로 이번 상태와 명확히 다릅니다.
+
+따라서 이번 재부팅은 **자동복구 PASS**로 올립니다. 다만 최종 wake-lock 대체 확정에는 재부팅 후 이 상태가 장시간 유지되는지 추가 soak가 필요합니다. Termux UI가 보이지 않는 것 자체는 backend failure로 취급하지 않습니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
