@@ -18,4 +18,16 @@
 3. 그 결과가 서버 sshd 부재를 가리킬 때만 서버폰 Termux를 열어 기존 상태를 기록합니다. 먼저 재시작하거나 수정하지 않습니다.
 4. GPT 알림 작업과 서버 연결 문제는 별도 원인으로 취급하고, 알림 구현이 Termux/process control을 건드리는지 확인 전에는 연결 원인으로 단정하지 않습니다.
 
+## 성공 후 완전 단절 관찰
+
+사용자가 이후 시점에 서버 연결이 단순한 순간 끊김을 넘어 **완전히 끊긴 상태**라고 보고했습니다. 이는 현재 문제를 단순한 짧은 SSH 재접속이나 UI 지연으로 보지 않고, 실제 원격 경로 단절로 취급해야 한다는 의미입니다.
+
+이 완전 단절 상태는 원인 분리에 매우 유용하므로 서버폰의 Termux/Tailscale/PocketRisu를 수동으로 열거나 재시작하지 않고 보존합니다. 다음 검사는 메인폰에서 즉시 다음 세 가지를 동시에 확인합니다.
+
+- supervised SSH tunnel 상태와 PID age
+- localhost core/engine health
+- tunnel과 동일한 서버 대상의 direct SSH 8022 결과
+
+이 결과로 `Connection refused`이면 서버 sshd/Termux service 부재 쪽, timeout/no-route이면 Tailscale/네트워크 경로 쪽, direct SSH 성공인데 localhost API만 실패하면 메인 tunnel 또는 서버 PocketRisu/bridge 쪽으로 분리합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
