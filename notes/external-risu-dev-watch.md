@@ -18,7 +18,7 @@ Track useful changes for PocketRisu without blind cherry-picking. Each active so
   - Last reviewed HEAD: `b0d40f89a9f40b29900d86e5251a78649b2c6173`
 - Source: `PocketRisu/PocketRisu`
   - Branch: `develop`
-  - Last reviewed HEAD: `6fef1880363142f39ef3401669e2413be8fb7a34`
+  - Last reviewed HEAD: `934955a16fd0d214330d5e61320753c20ca54d06`
 - Source: `InoriNatsume/RisuVault`
   - Branch: `master`
   - Last reviewed HEAD: `1284cc93853bdba80fc3aab537fad2817d695914`
