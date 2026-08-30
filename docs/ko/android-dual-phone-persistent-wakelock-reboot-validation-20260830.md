@@ -48,4 +48,24 @@
 
 다만 같은 블록의 direct SSH 8022 명령은 사용자가 붙여넣은 출력이 `ssh ... true >/dev/null 2>"$ERR"` 실행 부분에서 끝나 종료코드/분류가 아직 보이지 않습니다. 따라서 direct SSH 자체의 최종 분류는 보류합니다. 또한 이 원격 PASS만으로 Android wake lock이 실제로 획득·유지 중임을 독립적으로 직접 증명한 것은 아니며, persistent wake lock의 장기 안정성 판정에는 더 긴 soak가 필요합니다.
 
+## direct SSH 8022 최종 분류: PASS
+
+직전 direct SSH 명령의 종료코드를 바로 보존해 확인한 결과:
+
+- `ssh_rc=0`
+- `CLASS=DIRECT_SSH_OK`
+
+따라서 서버폰 재부팅 후 Termux UI를 다시 열지 않은 상태에서도 실제 서버 sshd가 port `8022`에서 정상적으로 연결을 수락하고 명령 실행까지 완료했습니다. 이는 단순히 메인폰의 기존 tunnel 프로세스가 남아 있는 수준이 아니라, 서버폰의 sshd 자체가 살아 있음을 직접 확인한 결과입니다.
+
+앞선 결과와 합치면 이번 persistent wake lock 패치 후 재부팅 검증은 다음 조건을 모두 만족했습니다.
+
+- 메인 SSH tunnel 연속 run
+- 메인 notify tunnel 연속 run
+- forwarded PocketRisu core HTTP 200
+- forwarded local-usage engine HTTP 200
+- direct SSH 8022 성공
+- 서버폰 Termux UI를 수동으로 다시 열지 않음
+
+따라서 **persistent wake lock 구성의 재부팅 직후 자동복구는 PASS 확정**으로 판정합니다. 다만 과거 wake-lock-free 구성은 재부팅 직후에는 통과하고도 시간이 지난 뒤 전체 Termux/runit 서비스 스택이 사라졌으므로, 이번 구성의 최종 안정성 판정은 장시간 soak 이후에 별도로 수행합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
