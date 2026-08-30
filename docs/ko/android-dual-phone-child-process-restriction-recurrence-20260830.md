@@ -73,4 +73,25 @@
 
 현재 가장 강한 안정성 증거는 임시 wake lock을 유지한 동안 완전 단절이 재현되지 않았다는 반복 관찰입니다. 다음 운영 방향은 서버폰 wake lock을 안정성 기본값으로 복구한 뒤, wake lock 자체를 제거하려 하기보다 PocketRisu/bridge/SSH/reconnect/logging의 idle CPU와 wakeup을 줄여 발열·배터리 소모를 최적화하는 것입니다.
 
+## 서버폰 Termux 재오픈 직후 재구성 및 wake lock 복구 기준점
+
+메인폰에서 `Connection refused`까지 확보한 뒤 서버폰 Termux를 직접 열어 상태를 확인했습니다. Termux를 연 직후 `runsvdir` PID는 `26182`였고, 다음 다섯 서비스가 모두 약 `1s` age로 동시에 새로 올라왔습니다.
+
+- `sshd` PID `26192`
+- `pocketrisu` PID `26189`
+- `local-usage-runtime-manager` PID `26193`
+- `local-usage-runtime-engine` PID `26197`
+- `llmgateway-bridge` PID `26194`
+
+이 결과는 장애 중 sshd 단독이 아니라 Termux runit 서비스 그룹 전체가 사라졌고, Termux UI를 여는 행위가 supervisor/service stack을 다시 구성했다는 기존 관찰을 다시 확인합니다.
+
+그 직후 `termux-wake-lock`을 실행했고 종료코드는 `0`이었습니다. wake lock 획득 전후 `runsvdir` PID는 `26182`로 동일했고, 다섯 서비스의 PID도 모두 유지된 채 age가 `1s`에서 약 `4s`로 연속 증가했습니다. 따라서 wake lock 획득 자체가 서비스 재시작을 일으키지는 않았습니다.
+
+다만 wake lock 획득 직후 로컬 health는 다음과 같이 엇갈렸습니다.
+
+- PocketRisu core `127.0.0.1:6001/api/health`: HTTP `000`
+- local-usage engine `127.0.0.1:39117/health`: HTTP `200`
+
+따라서 이 시점에는 **wake lock 획득은 성공했지만 서버 복구 완료로 판정하지 않습니다.** PocketRisu 서비스가 단순 기동 중인지, core만 별도 실패한 것인지 확인하기 위해 수정 없이 추가 INSPECT_ONLY가 필요합니다. 예상과 다른 결과이므로 boot script나 서비스 파일은 아직 변경하지 않습니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
