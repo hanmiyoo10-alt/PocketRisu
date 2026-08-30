@@ -23,18 +23,23 @@
 
 따라서 이 시점에서 서버폰 Termux를 수동으로 열지 않았는데도 메인 터널이 재구성되었고 PocketRisu core/engine이 정상 응답하므로 **재부팅 직후 backend 자동복구는 PASS**입니다.
 
-## direct SSH 상태
+## direct SSH 최종 분류: PASS
 
-같은 검사 블록에서 direct SSH 8022를 실행했으나, 사용자가 제공한 출력은 SSH 명령 직후에서 끝났고 `ssh_rc`/분류 출력은 아직 없습니다.
+직전 direct SSH 8022 명령의 종료코드를 바로 보존해 확인한 결과:
 
-따라서 현재 판정은:
+- `ssh_rc=0`
+- `CLASS=DIRECT_SSH_OK`
+
+따라서 서버폰 Termux를 직접 열지 않은 상태에서 다음이 모두 성립합니다.
 
 - main SSH tunnel: PASS
 - main notify tunnel: PASS
 - forwarded core: HTTP 200
 - forwarded engine: HTTP 200
-- direct SSH 8022: 판정 보류
+- direct SSH 8022: PASS
 
-최종 remote-path PASS는 direct SSH 종료코드를 확인한 뒤 선언합니다.
+즉 **wake-lock 계측/2회 요청 패치가 적용된 첫 controlled reboot에서 전체 remote-path 자동복구는 PASS**입니다.
+
+다만 이는 재부팅 직후 자동복구 성공을 의미하며, 장시간 backend 생존까지 아직 확정하지는 않습니다. 다음 단계에서는 서버폰 Termux를 열지 않은 채 메인폰 direct SSH를 이용해 `~/.termux/boot-wakelock.log`와 `~/.termux/boot-wakelock-last`를 읽어 `boot_initial`, `core_wait`, `post_core_wait` 실행 결과를 확인합니다.
 
 정확한 Tailscale 주소, 인증정보, 토큰 등 비밀/식별 정보는 기록하지 않습니다.
