@@ -81,4 +81,16 @@ root 환경에서 Android init/Magisk service 등으로 Termux UID 밖의 더 �
 
 따라서 옵션 ON + wake lock ON 조건은 최소 약 1시간 동안 안정적으로 유지된 것으로 확인했습니다. 다음 단계에서는 파일을 수정하지 않고 런타임 wake lock만 해제하여 `Disable child process restrictions=ON + wake lock=OFF` 조건을 만들고, 실사용/백그라운드 생존성을 비교합니다.
 
+## wake lock OFF A/B 시작
+
+파일이나 runit service 정의는 수정하지 않고 런타임에서 `termux-wake-unlock`만 실행했습니다.
+
+- `termux-wake-unlock` 종료코드: `0`
+- 해제 전 `runsvdir` PID: `20616`
+- 해제 2초 후 `runsvdir` PID: `20616`으로 동일
+- `sshd`, `pocketrisu`, `local-usage-runtime-manager`, `local-usage-runtime-engine`, `llmgateway-bridge`는 모두 기존 PID를 유지했고 service age는 약 `3932s`까지 연속 증가
+- wake lock 해제 자체로 supervisor/service 재시작이나 즉시 장애는 발생하지 않음
+
+따라서 현재 A/B 조건은 **`Disable child process restrictions=ON + wake lock=OFF`**로 깨끗하게 시작됐습니다. 서버폰 Termux는 홈으로 백그라운드에 두고 최근 앱에서 제거하지 않으며, 평소 메인폰 PocketRisu 실사용 중 이전과 같은 완전 단절이 재현되는지 관찰합니다. 장애가 다시 발생하면 서버폰 Termux를 열기 전에 메인폰에서 direct SSH 8022 결과를 먼저 확보해 이전 `Connection refused` 패턴과 비교합니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
