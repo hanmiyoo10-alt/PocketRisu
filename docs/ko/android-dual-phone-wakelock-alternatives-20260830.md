@@ -58,4 +58,10 @@ root 환경에서 Android init/Magisk service 등으로 Termux UID 밖의 더 �
 - Android 공식 process lifecycle 문서: foreground service process는 일반 background/cached process보다 높은 중요도로 취급됨
 - Android 공식 Doze/App Standby 문서: battery optimization/allowlist는 background execution 제약을 완화하지만 장기 프로세스 생존을 보장하는 메커니즘과는 다름
 
+## 서버폰 Developer option 기준점
+
+서버폰에서 Developer options의 `Disable child process restrictions` 항목이 존재하며, 확인 시점에는 **OFF**였습니다. 따라서 지금까지 관찰된 wake-lock 미사용 시 runit/sshd 전체 종료 현상은 child-process 제한이 활성 상태인 조건에서 발생한 것으로 기록합니다.
+
+다음 A/B에서는 다른 변수를 바꾸지 않고 현재 임시 wake lock을 유지한 채 이 옵션만 ON으로 변경합니다. 옵션 변경 직후에는 wake lock을 그대로 둔 상태에서 기능 이상이 없는지 먼저 확인하고, 그 다음 단계에서만 런타임 wake lock을 해제해 장시간 실사용 안정성을 비교합니다. 이 순서로 진행해야 child-process 제한 해제가 wake lock을 실제로 대체할 수 있는지 분리해서 판단할 수 있습니다.
+
 정확한 Tailscale 주소, 계정 정보, 인증 토큰 등 비밀/식별 정보는 기록하지 않습니다.
