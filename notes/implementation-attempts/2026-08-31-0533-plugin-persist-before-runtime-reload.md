@@ -27,6 +27,16 @@ Result: transient environment/network failure — `Could not resolve host: githu
 
 Because focused tests and project checks could not be run from a clean isolated checkout, the automation stopped before production branch/code creation. No unverified GitHub Contents API edit was used as a substitute.
 
+### Retry — 2026-08-31 11:44 KST
+
+The candidate was re-inspected against current personal-fork `develop` (`e57c0435018646800566f2158fd1a9fa12caa9e2`). The ordering gap is still present exactly as previously recorded: `setDatabaseLite(db)` -> fire-and-forget `requestImmediateSave()` -> targeted V3 `reloadV3Plugin(pluginData)` or general `loadPlugins()`.
+
+Source evidence `nevaeh5379/Risuai@3b5b3d39425a6297e8ea8a634e6d957e17c7b771` was rechecked and still supports persistence-before-reload with regression coverage. The helper Feature-ID dossier also still marks the candidate `READY_TO_PORT`.
+
+GitHub connector access was healthy for repository inspection and durable-note writes, but the clean local verification environment again failed the same pre-branch command with `Could not resolve host: github.com`. Because the project policy requires modify -> focused verify before a successfully verified draft PR, connector-only source mutation was not used to bypass the unavailable test checkout.
+
+This repeated blocker is environmental, not a code or CI failure. Do not interpret connector write availability as sufficient verification for this candidate.
+
 ## Production status
 
 - Feature branch: not created
