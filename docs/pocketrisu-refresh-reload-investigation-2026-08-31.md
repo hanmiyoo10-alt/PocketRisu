@@ -6,6 +6,13 @@ PocketRisu에서 반복적으로 언급된 "새로고침"의 의미를 분리하
 
 현재 단계는 INSPECT_ONLY. 동작 변경 없음.
 
+## Project policy
+
+- Intentional automatic full-page reload is not an acceptable recovery mechanism.
+- A Firefox/page refresh remains a manual-only user action.
+- OOM work should reduce the reasons Android/Firefox kills and reconstructs the content process rather than deliberately reloading it.
+- Audio recovery should reset/recreate only the audio layer, not the page or chat state.
+
 ## Confirmed findings
 
 ### 1. Normal runtime does not appear to periodically force a full page reload
@@ -54,6 +61,37 @@ Commit `5fc6d8db7339cb65a9820199e133aafb981d3298` documents a field bug where a 
 
 Commit `518e30b51ac36d117d37c5ffcafe222a28714b97` moved provider request logs away from an in-memory `fetchLog` because those entries were lost on refresh. This is a separate meaning of "refresh loss" from model-response recovery.
 
+### 6. TTS currently leaks/abandons AudioContext lifecycle
+
+`src/ts/process/tts.ts` has a strong source-level candidate for both the audio-stuck symptom and some long-session memory pressure:
+
+- `playAudio()` creates a fresh `new AudioContext()` for each decoded TTS playback.
+- Only `sourceNode` is stored globally; the created `AudioContext` is not retained for later cleanup.
+- The normal playback path does not call `AudioContext.close()` when the source ends.
+- `stopTTS()` stops only the current `sourceNode` and cancels Web Speech. It does not disconnect/clear the source or close an AudioContext.
+- The GPT-SoVITS custom-volume branch duplicates the same fresh-`AudioContext` pattern instead of routing through one lifecycle owner.
+
+This path can be frequent: `src/ts/process/index.svelte.ts` calls `sayTTS()` after generated replies when `ttsAutoSpeech` is enabled, and `src/lib/ChatScreens/Chat.svelte` also calls it from the per-message TTS button.
+
+This is not yet proof that every observed Firefox OOM is caused by TTS, but it is a concrete resource-lifecycle defect that should be fixed independently. The intended repair is a page-preserving audio lifecycle: one owned current context/source, cleanup on stop/end/error, and a fresh usable context for the next playback when the old one is closed/stale. No `location.reload()` is involved.
+
+### 7. Chat rendering does unmount messages outside `loadPages`, but `loadPages` can grow and stay large
+
+`src/lib/ChatScreens/Chats.svelte` is not simply accumulating every message forever. It computes the currently rendered message range from `loadPages`, compares hashes, explicitly `unmount()`s Svelte instances outside that range, removes their DOM elements, and clears all mounted instances on component destruction.
+
+The pressure point is the parent `src/lib/ChatScreens/DefaultChatScreen.svelte`:
+
+- initial render range defaults to 30 messages (`src/ts/chatLoadPages.ts`);
+- scrolling upward increases `loadPages` in additional chunks (default 15);
+- jumping to an old message can raise `loadPages` enough to reach that message;
+- no normal downward-scroll path seen so far reduces `loadPages` again;
+- chat screenshot temporarily sets `loadPages = Infinity` to render the full chat;
+- the screenshot success path resets it to the initial value, but the inspected `catch` path does not perform that reset.
+
+Therefore a long browsing session can retain a much larger rendered chat DOM than the normal initial range even though `Chats.svelte` itself has correct unmount logic. A screenshot failure is an especially clear edge case where the full-chat render range may remain active until another state reset/page reload.
+
+A likely OOM mitigation is a **soft DOM trim**: reduce `loadPages` back toward its normal window at safe moments (for example after returning to the latest-message region and on chat changes), and guarantee screenshot restoration in `finally`. This discards only rendered component/DOM instances; it must not discard chat messages or trigger a page reload.
+
 ## Working taxonomy for the next investigation
 
 Do not use "refresh" as one diagnosis. Separate at least:
@@ -63,10 +101,16 @@ Do not use "refresh" as one diagnosis. Separate at least:
 3. **Network return** — `online` fires after connectivity loss.
 4. **Generation/job recovery** — server-side job is rediscovered/reattached/slot-in occurs.
 5. **Chat persistence verification** — reload is used to prove whether a UI-visible write was really saved.
-6. **UI/reactivity reset** — reload may appear to fix stale client/Svelte state even when backend state is healthy; this remains to be investigated.
+6. **UI/reactivity/audio reset** — reload may appear to fix stale client state even when backend state is healthy; audio now has a concrete lifecycle defect under investigation.
+7. **OOM/content-process reconstruction** — Firefox/Android kills the page under memory pressure and reconstructs it, which feels like an unwanted automatic refresh but is not an intentional PocketRisu `location.reload()`.
 
 ## Current conclusion
 
 There is already strong source/history evidence that some past "새로고침하면 살아남/살아남지 않음" reports were not fundamentally about page reload itself. Full reload acted as a catch-all recovery trigger and as a persistence test. PocketRisu now has explicit foreground and network-return recovery intended to remove that dependency for server-side model jobs.
 
-The remaining investigation should focus on cases where users still feel a manual Firefox refresh is required despite `visibilitychange`/`online` recovery, especially UI/reactivity state, session reconnection, and any paths outside server-side model-job recovery.
+For the two current high-priority refresh complaints, source inspection has produced two concrete first targets without introducing automatic reload:
+
+1. Fix TTS `AudioContext`/source ownership and cleanup so audio can recover independently of the page and does not accumulate abandoned audio resources.
+2. Make chat rendering memory self-trimming by bounding `loadPages` again at safe points and restoring screenshot render range in `finally`.
+
+Broader Firefox OOM investigation should continue after these concrete leaks/retention paths are fixed; neither finding alone is yet claimed to explain every OOM event.
