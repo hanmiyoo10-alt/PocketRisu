@@ -26,7 +26,6 @@
 - local-usage manager/engine만 별도 PID로 바뀌었으며 현재 age로 역산하면 약 13:49:23~13:49:25 KST에 부분 재시작이 발생했다.
 - 따라서 이번 결과를 전체 서비스 동일 세대 PASS로 기록하면 안 된다.
 - 이 부분 재시작은 Termux 전체 세대 소실과는 다른 형태다.
-- 과거 local plugin update와 manager/engine 재시작 상관이 있었지만, 이번 건의 원인은 로그 확인 전까지 같은 원인으로 단정하지 않는다.
 
 ## 19:21 KST 재확인
 
@@ -48,10 +47,34 @@
 해석:
 - core 계층 및 SSH/notify 터널은 계속 동일 세대를 유지했다.
 - local-usage manager/engine도 13:49경 재시작된 뒤 19:21까지 추가 재시작 없이 유지됐다.
-- 이 재확인은 부분 재시작이 반복 중인 현상은 아님을 보여주지만, 13:49 재시작의 원인을 설명하지는 않는다.
+- 이 재확인은 부분 재시작이 반복 중인 현상은 아님을 보여줬다.
 
-## 다음 단계
+## 19:26 KST 원인 분류
 
-서버폰 Termux UI를 열기 전에 메인폰 SSH를 통해 manager/engine 관련 로그 및 런타임 변경 흔적을 검사해 13:49 부분 재시작 원인을 분류한다.
+서버폰 Termux UI를 여전히 열지 않은 상태에서 메인폰 SSH로 local-usage 서비스 파일과 runtime 파일의 mtime을 검사했다.
+
+관찰:
+- local-usage-runtime-manager/run mtime: 2026-08-19 16:07:30 KST
+- local-usage-runtime-engine/run mtime: 2026-09-01 13:49:25.199 KST
+- bridge-manager.cjs mtime: 2026-09-01 13:49:22.635
+- bridge-manager.cjs.bak mtime: 2026-09-01 13:49:23.043
+- bridge-engine.mjs mtime: 2026-09-01 13:49:24.587
+- engine-adopted.json mtime: 2026-09-01 13:49:26.195
+- manager 현재 세대 시작 시각은 age 역산상 약 13:49:23 KST
+- engine 현재 세대 시작 시각은 age 역산상 약 13:49:25 KST
+
+해석:
+- runtime 파일 갱신과 manager/engine 재기동 시각이 초 단위로 맞물린다.
+- 특히 manager runtime 코드 갱신 -> manager 재기동, engine runtime 코드 및 service run 파일 갱신 -> engine 재기동 -> engine-adopted.json 갱신 순서가 관찰됐다.
+- 따라서 13:49 부분 재시작은 Termux 전체 세대 소실이나 Android 백그라운드 kill 패턴이 아니라 local-usage runtime 업데이트/배포 이벤트에 수반된 선택적 재기동으로 분류하는 것이 가장 잘 맞는다.
+- 핵심 서버 계층인 sshd / pocketrisu / llmgateway-bridge와 메인 SSH/notify 터널은 이 이벤트를 가로질러 동일 세대를 유지했다.
+- 과거 약 11분 Termux/sshd 세대 소실 문제는 이번 부팅에서 14시간 이상 재현되지 않았다.
+
+## 최종 결론
+
+- unattended soak 기준 핵심 서버 스택은 PASS로 본다.
+- local-usage manager/engine의 13:49 재기동은 runtime 파일 교체와 동기화된 별도 업데이트 이벤트로 분류한다.
+- 이 부분 재기동 때문에 전체 Termux 안정성 검증을 실패로 처리하지 않는다.
+- 이 시점 이후 서버폰 Termux UI를 열어 일반 작업에 사용해도, 이미 수집된 unattended soak 증거는 유효하다.
 
 민감한 사설 주소, 토큰, 인증정보는 기록하지 않는다.
