@@ -28,6 +28,28 @@
 - 이 부분 재시작은 Termux 전체 세대 소실과는 다른 형태다.
 - 과거 local plugin update와 manager/engine 재시작 상관이 있었지만, 이번 건의 원인은 로그 확인 전까지 같은 원인으로 단정하지 않는다.
 
+## 19:21 KST 재확인
+
+동일한 상태 점검을 다시 실행했다.
+
+메인폰:
+- pocketrisu-ssh-tunnel: pid 10229, age 52852s
+- pocketrisu-notify-tunnel: pid 10226, age 52853s
+- core HTTP 200
+- engine HTTP 200
+
+서버폰:
+- sshd: pid 14047, age 52853s
+- pocketrisu: pid 14051, age 52853s
+- llmgateway-bridge: pid 14048, age 52853s
+- local-usage-runtime-manager: pid 16807, age 19900s
+- local-usage-runtime-engine: pid 16864, age 19898s
+
+해석:
+- core 계층 및 SSH/notify 터널은 계속 동일 세대를 유지했다.
+- local-usage manager/engine도 13:49경 재시작된 뒤 19:21까지 추가 재시작 없이 유지됐다.
+- 이 재확인은 부분 재시작이 반복 중인 현상은 아님을 보여주지만, 13:49 재시작의 원인을 설명하지는 않는다.
+
 ## 다음 단계
 
 서버폰 Termux UI를 열기 전에 메인폰 SSH를 통해 manager/engine 관련 로그 및 런타임 변경 흔적을 검사해 13:49 부분 재시작 원인을 분류한다.
