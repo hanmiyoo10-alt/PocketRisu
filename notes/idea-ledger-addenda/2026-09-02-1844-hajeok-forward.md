@@ -21,7 +21,7 @@ Reviewed `nevaeh5379/HaejeokRisuai:main` strictly forward from authoritative cur
 
 ## Deduped forward evidence — preset source of truth
 
-`a3aa2519d7962c845e01e8645866f8879ad0d10d` (merged by `f598fef71c29efb31e790c6ba1cb9148a85929f5` is NOT the correct merge SHA; authoritative merge is `f598fef71c29c703961464dd63dfd0d3ca08f1ea`) changes prompt-template validation to consume `presetStore.state.promptTemplate` rather than the old settings/database-shaped state and adds focused tests. This is the same underlying source-of-truth migration lesson already observed in Haejeok's preset-store/fallback-model fixes, not a new PocketRisu idea. No duplicate lifecycle item was created.
+`a3aa2519d7962c845e01e8645866f8879ad0d10d`, merged by `f598fef71c29c703961464dd63dfd0d3ca08f1ea`, changes prompt-template validation to consume `presetStore.state.promptTemplate` rather than the old settings/database-shaped state and adds focused tests. This is the same underlying source-of-truth migration lesson already observed in Haejeok's preset-store/fallback-model fixes, not a new PocketRisu idea. No duplicate lifecycle item was created.
 
 ## Cursor decision
 
