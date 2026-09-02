@@ -44,8 +44,17 @@ Reviewed `rpaddict/RisuBard:main` strictly forward from authoritative cursor `d8
 
 Forward finalization `f86449ef643806d3ccbb8eec81d7f1ee46a6df6c` adds an explicit opt-in `top` tier for a confirmation that must appear above the BardWiki dock. This is additional evidence for the existing `GLOBAL-DYNAMIC-MODAL-LAYER-STACK-IS-NOT-SAFE-AUTHORITY` regression lesson: fix exceptional ownership with a narrow explicit tier, not by restoring global DOM-observer ordering. No new duplicate idea was created.
 
+## Autonomous progression records
+
+- Ledger initial forward-review commit: `07e6621a3c8510473fdf0565ae7204a90de2c8ce`.
+- Assistant-owned design draft commit: `7bc065d58ee77d74acdbc85ae39fa8cb0f5d05d1` at `notes/design-drafts/narrative-memory-rebuild-checkpoint-identity.md`.
+- Helper-repo dossier commit: `9031862c8ebcba7be9c2ef47ff222c3f8035409d` at `hanmiyoo10-alt/-:products/pocketrisu-helper-mod/docs/features/memory/narrative-memory-rebuild-checkpoint-identity/DESIGN.md`.
+- Registry cursor update commit: `6df6b9a1f6efe6a9b1b1cfdd3c2222f47b729103`.
+- Implementation branch/tests/personal PR: not created. The item remains `DESIGN_NEEDED` with unresolved owning-subsystem dependencies, so the autonomous implementation gate is not satisfied.
+
 ## Cursor / backfill
 
 - Advance only `rpaddict/RisuBard:main` forward cursor to `f86449ef643806d3ccbb8eec81d7f1ee46a6df6c`.
 - Other Active sources checked in this run remained at their authoritative cursor HEADs.
+- Bounded discovery checked current RisuAI-related repositories; `kangjoseph90/Risu-Antigravity` is a plugin-specific repository last pushed 2026-08-14, not a maintained full-code Risu-family divergence, so it was not promoted to Active sources.
 - `HISTORICAL_BACKFILL_COMPLETE_THROUGH` is unchanged; this forward review does not prove additional complete historical coverage.
