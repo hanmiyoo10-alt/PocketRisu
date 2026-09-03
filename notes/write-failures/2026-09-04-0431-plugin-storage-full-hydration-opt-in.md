@@ -1,0 +1,1 @@
+GitHub integration write was blocked while attempting to record the adopted invariant `PLUGIN-STORAGE-FULL-HYDRATION-EXPLICIT-OPT-IN`. No code or CI action was attempted. Source commits: `cccaf9ee585279467c98d8a0bb61d04c1392c6d9`, `838b47e598210a565ed3c0aa1474fbf20e6d97d4`.
