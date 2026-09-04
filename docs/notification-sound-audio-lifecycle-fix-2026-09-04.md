@@ -151,6 +151,23 @@ This materially narrows the failure domain. During the stuck state, the main-pho
 
 The bounded completion `HTMLAudioElement` patch therefore fixes the ordinary playback lifecycle but does **not** by itself fix the headset route-change failure. The next diagnostic step is to inspect server-side request/job/log state from the same failure window before changing more client code. The key question is whether the model request completed server-side while the browser remained stuck, or whether the request itself was still active. No automatic page reload should be added as recovery.
 
+## Server-side inspection during the same headset failure
+
+The server phone was inspected at `2026-09-04 12:30:12 KST`, while the browser was still kept in the stuck state.
+
+Observed state:
+
+- `pocketrisu` service was still running as PID `17599`, with about `62800s` of continuous service age;
+- direct server-phone `127.0.0.1:6001/api/health` returned HTTP `200`;
+- `pocketrisu-service.log` mtime was `2026-09-04 12:03:08 +0900`, roughly 27 minutes **before** this failure capture;
+- therefore the many `ERR_STREAM_PREMATURE_CLOSE`, `TermuxNotifyRelay TimeoutError`, HTTP/2 termination, and old flush-worker errors found by grepping the service log are historical entries and cannot be attributed to the 12:28 headset failure from this capture alone;
+- the raw tail likewise contained no event timestamped in the 12:28–12:30 failure window;
+- current server source registers the durable model-job subsystem through `server/node/model-jobs.cjs`.
+
+The model-job implementation persists metadata in `save/model-jobs.db` and response bytes in `save/model-jobs/<jobId>.journal`. Jobs have terminal statuses `done`, `failed`, or `aborted`; the recovery list exposes active main jobs and terminal unclaimed main jobs. Because the ordinary service log is stale for this failure window, the next reliable diagnostic is a **read-only query of the model-jobs database/journals**, not another interpretation of the old log errors.
+
+Classification: **SERVER_HEALTHY / SERVICE_LOG_NOT_TIME-CORRELATED / MODEL_JOB_STATE_PENDING**.
+
 ## Deployment status at this checkpoint
 
 - source patch: PASS
@@ -165,8 +182,12 @@ The bounded completion `HTMLAudioElement` patch therefore fixes the ordinary pla
 - ordinary completion-sound runtime smoke test: PASS
 - headset route-change stress test: **FAIL**
 - main-phone core/SSH path during stuck state: **HEALTHY**
-- server-side request/job state during that same window: pending inspection
+- server-phone PocketRisu service/core health during stuck state: **HEALTHY**
+- service-log entries shown during failure investigation: **not time-correlated; log mtime predates failure**
+- current model-job DB/journal state: pending read-only inspection
 
 ## Interpretation
 
-This patch removes a concrete unbounded/abandoned `HTMLAudioElement` lifecycle in the exact automatic completion-sound path and has a successful ordinary runtime smoke test. However, a real headset connect/disconnect route change still reproduces the infinite-loading symptom while the main SSH tunnel and forwarded core health remain available. The remaining failure is therefore narrower than the original audio-element leak and requires request/job/client-state correlation before any further patch.
+This patch removes a concrete unbounded/abandoned `HTMLAudioElement` lifecycle in the exact automatic completion-sound path and has a successful ordinary runtime smoke test. However, a real headset route change still reproduces the infinite-loading symptom while both the main SSH tunnel and PocketRisu core remain healthy. The remaining failure is therefore narrower than the original audio-element leak.
+
+The server log output collected during the failure must not be misread as proof that the current request hit `ERR_STREAM_PREMATURE_CLOSE`: the log file had not changed since 12:03, well before the 12:28 reproduction. The next discriminating evidence is the durable model-job database/journal state for the current window. No automatic page reload should be introduced as recovery.
