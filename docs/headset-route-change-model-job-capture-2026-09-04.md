@@ -23,7 +23,7 @@ At approximately 12:30 KST:
 - direct `127.0.0.1:6001/api/health` returned HTTP 200;
 - `pocketrisu-service.log` had not been modified since 12:03, so old `ERR_STREAM_PREMATURE_CLOSE`, relay timeout, and HTTP/2 errors in that file are not time-correlated evidence for this incident.
 
-## Provisional durable model-job DB capture
+## Durable model-job DB capture
 
 At approximately 12:32 KST, `$HOME/PocketRisu/save/model-jobs.db` was opened read-only and queried for the previous three hours.
 
@@ -34,27 +34,47 @@ Observed result:
 - unclaimed terminal main jobs: none;
 - pending sends: none.
 
-However, the inspected DB files had unexpectedly old timestamps (`model-jobs.db` from August, WAL from August, SHM from September 3). Because `server.cjs` passes its runtime `savePath` into `createModelJobs(...)`, this result must be treated as **provisional until the live process's actual savePath / open model-jobs DB file is confirmed**.
+Initially this was treated as provisional because the DB/WAL timestamps looked unexpectedly old.
 
-Do not yet conclude that the 12:28 incident bypassed model jobs solely from this default-path query.
+## Live DB path confirmation
+
+A follow-up INSPECT_ONLY check confirmed that the queried path is the database opened by the live PocketRisu process.
+
+Observed live process details:
+
+- `pocketrisu` PID: `17599`;
+- process cwd: `/data/data/com.termux/files/home/PocketRisu`;
+- `server/node/server.cjs` defines `savePath = path.join(process.cwd(), "save")`;
+- `createModelJobs({ saveDir: savePath, logger })` therefore resolves to `$HOME/PocketRisu/save` for this process;
+- `/proc/17599/fd/23` points to `$HOME/PocketRisu/save/model-jobs.db`;
+- `/proc/17599/fd/24` points to `$HOME/PocketRisu/save/model-jobs.db-wal`;
+- `/proc/17599/fd/25` points to `$HOME/PocketRisu/save/model-jobs.db-shm`;
+- a full `$HOME` search found no second model-jobs DB set.
+
+This removes the earlier uncertainty: the 12:32 read-only query was against the actual live model-job database.
 
 ## Current interpretation
 
 Confirmed:
 
-1. main-phone SSH/core transport was healthy;
-2. server PocketRisu health was healthy;
-3. the default `$HOME/PocketRisu/save/model-jobs.db` query returned no recent/active/unclaimed jobs and no pending sends;
-4. that DB looks stale enough that its relevance to the live process must be verified before using it diagnostically.
+1. main-phone SSH/core transport was healthy during the failure;
+2. server PocketRisu health was healthy during the failure;
+3. the live model-job DB contained no job created in the preceding three hours;
+4. there was no active main job, unclaimed terminal main job, or pending-send tombstone for the incident;
+5. therefore the 12:28 infinite-loading request did not leave any durable model-job state in the live server database.
 
-`jobFetch.ts` normally POSTs `/api/model-jobs` before attaching to `/api/model-jobs/:id/stream`, and falls back to the direct request path if creation throws or returns a non-OK status other than 409. But classic/direct routing versus failed-job-creation fallback cannot be distinguished until the live DB path and request-selection path are verified.
+This strongly narrows the remaining possibilities. `jobFetch.ts` normally POSTs `/api/model-jobs` before attaching to `/api/model-jobs/:id/stream`, and model-job creation persists a row immediately. Therefore one of the following is more likely than a stuck durable model job:
+
+- the active chat/request used a classic/direct request path that does not use `makeJobFetch`;
+- the ModelPreset path attempted model-job creation but creation failed client-side or received a non-OK result and `jobFetch.ts` fell back to its direct proxied request path;
+- the client became stuck before reaching the model-job creation call.
+
+The old DB/WAL timestamps are no longer evidence that a different DB is in use; `/proc/<pid>/fd` proves this is the live DB. They instead indicate there has been no recent persisted model-job write in this database.
 
 ## Next diagnostic
 
 Keep the browser stuck if possible and do not patch or reload yet.
 
-1. Inspect `server.cjs` for the live `savePath` definition.
-2. Inspect `/proc/<pocketrisu-pid>/fd` for the actual open `model-jobs.db`, WAL, and SHM files.
-3. Only after that, query the confirmed live DB and inspect the request-selection path if needed.
+Inspect the deployed request-selection path around `makeJobFetch`, the ModelPreset/classic binding decision, and any request-log storage that can show whether `/api/model-jobs` was attempted or whether the request went through the direct proxy path.
 
 Automatic full-page reload remains forbidden as a recovery mechanism.
