@@ -92,6 +92,25 @@ This materially changes the diagnostic priority:
 - avoid changing the relay or server producer until browser-side notification sources are identified;
 - the earlier relay evidence remains useful because it independently shows no POST storm at the time of capture.
 
+## Browser-notification source grep
+
+A targeted server-phone source grep was run over `src`, `static`, and `public` for:
+
+- `new Notification`;
+- `showNotification`;
+- `PushManager`;
+- service-worker notification handling;
+- `notificationclick`.
+
+The command returned no matches.
+
+Interpretation:
+
+- no obvious direct Web Notifications API / Web Push implementation was found in those source trees;
+- this makes a simple PocketRisu `new Notification(...)` or service-worker push loop less likely;
+- the symptom can still be Firefox-specific without using the Web Notifications API, for example repeated media/foreground-service/browser UI notifications associated with active audio or media state;
+- next inspection should therefore search broader media/audio/session APIs rather than patching the Termux notification relay.
+
 ## Current interpretation
 
 Confirmed:
@@ -103,19 +122,15 @@ Confirmed:
 5. the latest captured pair was approximately 19:23:34 KST start and 19:24:54 KST done;
 6. the notify SSH tunnel had a long outage before reconnecting, but current evidence does not show backlog replay after reconnect;
 7. therefore the reported "infinite notification" behavior is **not explained by repeated `/notify` delivery into the relay** in this capture;
-8. user observation narrows the active symptom to Firefox while PocketRisu is in use.
+8. user observation narrows the active symptom to Firefox while PocketRisu is in use;
+9. targeted browser-notification API grep found no matches in `src`, `static`, or `public`.
 
-Remaining candidates now prioritize:
-
-- PocketRisu browser `Notification` usage;
-- service-worker / web-push notification paths;
-- Firefox site-notification behavior specific to the PocketRisu origin;
-- browser-side code repeatedly requesting or updating a notification.
+Remaining candidates now prioritize Firefox behavior associated with PocketRisu media/audio activity rather than direct Web Notification API calls.
 
 Do not patch the Termux relay or server producer based on this capture.
 
 ## Next diagnostic
 
-Inspect PocketRisu browser-side notification sources first, with a minimal source grep for `Notification`, `showNotification`, `PushManager`, service-worker notification handlers, and related code paths.
+Inspect PocketRisu source for media/audio/session APIs that can make Firefox expose persistent or repeatedly updated browser notifications, such as `MediaSession`, `navigator.mediaSession`, HTML media playback, AudioContext, and audio element creation.
 
 No Android notifications should ever be created on the server phone.
