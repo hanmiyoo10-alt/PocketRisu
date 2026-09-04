@@ -148,6 +148,31 @@ One additional terminal-stage risk surfaced in the precheck: `src/ts/process/ind
 
 Because `globalApi.svelte.ts` is also locally modified, do not patch it until its existing diff is inspected. The lower-conflict repair candidate is currently the main streaming loop in `index.svelte.ts`, but the exact terminal cleanup path must be inspected before deciding whether timeout should break, return, or throw.
 
+## Final liveness prepatch inspection
+
+The final prepatch inspection produced three additional findings.
+
+### Existing `globalApi.svelte.ts` local diff
+
+The local `globalApi.svelte.ts` changes are unrelated to the body-stream timeout helper. They adjust session-handoff formatting/notice behavior and disable the hide-time `/api/db/flush` call. The file therefore remains locally modified, but the inspected diff does not overlap `buildTimeoutSignal(...)` or `fetchNativeRaw(...)`.
+
+The same inspected area also exposed an existing `location.reload()` in the session-handoff path of `saveDb()`. It is guarded by `if (get(doingChat)) return`, so it should not fire while the current stuck generation remains marked active. It is therefore not a strong explanation for this headset incident. However, it is a separate automatic-refresh path and must be handled independently under the project's manual-refresh-only policy rather than being silently treated as absent.
+
+### Main send terminal structure
+
+The shown `sendChat(...)` tail reaches `clearPendingSend(realChatId)` and `return true` at lines ~2117–2118, but no `endGeneration(genKey)` is visible in that tail segment. Earlier `endGeneration(...)` calls exist for placeholder/recursive/other branches, and external callers may perform terminal cleanup. Therefore it would be unsafe to assume that throwing from the new stream watchdog automatically releases generation state until the caller-level lifecycle is inspected.
+
+This is now a required precondition before patching: locate the actual successful/error caller cleanup around `sendChat(...)` and verify how the live generation entry is removed when `sendChat` returns or throws.
+
+### Auto-TTS branch
+
+Auto-TTS occurs in both the streaming and non-streaming response branches before the function's later terminal tail:
+
+- streaming branch: `if(DBState.db.ttsAutoSpeech) await sayTTS(currentChar, result)` around lines ~1701–1702;
+- non-streaming/multiline branch: the same await around ~1765–1766.
+
+The database default for `ttsAutoSpeech` is false, but the current user's runtime value was not established by this source-only inspection. The implementation of `sayTTS(...)` still needs a short inspection to determine whether it waits only for TTS fetch/decode/start or can remain pending for actual playback/audio-route state.
+
 ## Current interpretation
 
 Confirmed:
@@ -163,7 +188,9 @@ Confirmed:
 9. `fetchNativeRaw(...)` definitely clears its request timeout after the `Response` is obtained, before a streaming body is necessarily finished;
 10. the main streaming reader loop has no independent inactivity timeout or bounded read deadline;
 11. the target streaming file already contains unrelated local notification changes that must be preserved;
-12. auto-TTS is another possible post-stream non-terminal await because it occurs before terminal generation cleanup.
+12. auto-TTS is another possible post-stream non-terminal await because it occurs before terminal generation cleanup;
+13. the exact caller-level `endGeneration(...)` cleanup still must be located before introducing a thrown stream-timeout error;
+14. an unrelated automatic session-handoff `location.reload()` exists, but its `doingChat` guard makes it unlikely to explain the present stuck-generation incident.
 
 A stuck durable model job is unlikely. The strongest current structural explanation remains a client-side response-body stream that becomes non-terminal after a Firefox/Android route change, while the request timeout has already been cleared and no stream-read watchdog exists. TTS remains a second, separate client-side liveness candidate if auto-speech is enabled.
 
@@ -173,10 +200,10 @@ Do not add automatic page reload.
 
 Before editing:
 
-- inspect the current local diff in `src/ts/globalApi.svelte.ts`;
-- inspect the remaining terminal `sendChat` cleanup after the shown notification/TTS area to confirm exactly where `endGeneration(...)` and `clearPendingSend(...)` occur on success and thrown errors;
-- inspect the auto-TTS call site/setting only enough to avoid misattributing a post-stream TTS stall to the stream reader.
+- locate all non-definition `endGeneration(...)` / `endAllGenerations(...)` call sites and the UI caller(s) that await `sendChat(...)`;
+- inspect `sayTTS(...)` just far enough to establish whether its promise waits for playback completion or only setup/fetch work;
+- only after confirming terminal cleanup semantics, add the smallest bounded body-read timeout that unwinds through the correct cleanup path while preserving partial response and existing local notification changes.
 
-Then choose the smallest repair that guarantees a non-terminal body read can unwind into existing cleanup while preserving the unrelated notification modifications and any partial response already received.
+The separate `saveDb()` session-handoff reload should be tracked under the manual-refresh policy, but it should not be mixed into the headset-stream repair unless new evidence ties it to the incident.
 
 Automatic full-page reload remains forbidden as a recovery mechanism.
