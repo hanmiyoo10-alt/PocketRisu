@@ -53,6 +53,31 @@ Observed live process details:
 
 This removes the earlier uncertainty: the 12:32 read-only query was against the actual live model-job database.
 
+## Request-path source inspection
+
+The deployed request-selection source was inspected without modification.
+
+Key findings from `src/ts/process/request/request.ts`:
+
+- model-preset dispatch is selected by `resolveChatModelBinding(...)` before the classic model path;
+- inside the model-preset request path, server-side jobs are used only when `getDatabase().nodeOnlyServerSideRequests === true`, there are no tool calls, and the request is not a preview;
+- when that condition is false, the model-preset request uses `proxiedFetch` directly instead of `makeJobFetch`;
+- when `makeJobFetch` is selected, job-creation network errors or non-OK creation responses other than 409 fall back to `proxiedFetch`;
+- `makeProxiedFetch` itself uses `fetchNative`, which tries a browser direct request and can fall back to `/proxy2` on CORS/network failure;
+- request logging wraps the selected transport and records the resulting route (`direct`, `proxy`, or `job`) once its scope closes.
+
+Relevant gate:
+
+```ts
+const useServerJob = getDatabase().nodeOnlyServerSideRequests === true
+    && !tools && !arg.previewBody
+const transportFetch = useServerJob
+    ? makeJobFetch(...)
+    : proxiedFetch
+```
+
+This means an empty live `model-jobs.db` does **not** by itself imply a malfunction in the model-job subsystem. The request may legitimately have bypassed jobs because the server-side-request toggle was off, tools were active, the request was a preview, the chat resolved to the classic regime, or job creation fell back before a row was persisted.
+
 ## Current interpretation
 
 Confirmed:
@@ -61,20 +86,14 @@ Confirmed:
 2. server PocketRisu health was healthy during the failure;
 3. the live model-job DB contained no job created in the preceding three hours;
 4. there was no active main job, unclaimed terminal main job, or pending-send tombstone for the incident;
-5. therefore the 12:28 infinite-loading request did not leave any durable model-job state in the live server database.
+5. the job transport is conditionally gated and can be bypassed or fall back to the direct/proxy path.
 
-This strongly narrows the remaining possibilities. `jobFetch.ts` normally POSTs `/api/model-jobs` before attaching to `/api/model-jobs/:id/stream`, and model-job creation persists a row immediately. Therefore one of the following is more likely than a stuck durable model job:
-
-- the active chat/request used a classic/direct request path that does not use `makeJobFetch`;
-- the ModelPreset path attempted model-job creation but creation failed client-side or received a non-OK result and `jobFetch.ts` fell back to its direct proxied request path;
-- the client became stuck before reaching the model-job creation call.
-
-The old DB/WAL timestamps are no longer evidence that a different DB is in use; `/proc/<pid>/fd` proves this is the live DB. They instead indicate there has been no recent persisted model-job write in this database.
+Therefore the 12:28 infinite-loading incident is not explained by a durable model job stuck in `running`. The remaining diagnostic priority is to identify the actual transport used by the failed request and whether its request-log scope ever closed.
 
 ## Next diagnostic
 
 Keep the browser stuck if possible and do not patch or reload yet.
 
-Inspect the deployed request-selection path around `makeJobFetch`, the ModelPreset/classic binding decision, and any request-log storage that can show whether `/api/model-jobs` was attempted or whether the request went through the direct proxy path.
+Inspect the live request-log database around the 12:28 failure window and the runtime value of the server-side-request toggle if it can be obtained safely. Request-log rows should distinguish `direct`, `proxy`, and `job` when a scope completed; absence of a row may itself be meaningful because request-log entries are held until the scope closes.
 
 Automatic full-page reload remains forbidden as a recovery mechanism.
