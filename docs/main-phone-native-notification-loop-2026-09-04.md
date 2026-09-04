@@ -125,7 +125,29 @@ Notable hits:
 
 No `MediaSession` / `navigator.mediaSession` hit appeared in the shown result.
 
-The app-wide `src/App.svelte` silent-audio creation is the highest-priority next inspection because it is not limited to Playground/TTS usage and could cause Firefox to consider the PocketRisu tab an active media source. This is only a candidate until the surrounding trigger/lifecycle code is inspected.
+## App-wide keep-session-alive silent audio inspection
+
+The surrounding `src/App.svelte` code was inspected directly.
+
+Confirmed behavior when `DBState.db.keepSessionAlive === 'sound'` and the outer clickable app container receives its first click while `keepingSessionAlive` is false:
+
+```ts
+const silentAudio = new Audio(sendSound);
+silentAudio.loop = true;
+silentAudio.volume = 0.000001;
+silentAudio.play();
+keepingSessionAlive = true;
+```
+
+Important lifecycle findings:
+
+- playback is explicitly looped forever (`loop = true`);
+- the audio element is stored only in a local `const`, not in persistent component state;
+- in the inspected block there is no retained handle available for later `pause()`, `src=''`, or other cleanup;
+- the feature is app-wide rather than limited to Playground/TTS;
+- it is intentionally designed to keep the browser session/media activity alive.
+
+This is now a **strong Firefox-specific candidate** for the user's repeated notification/media-indicator symptom. Firefox Android can treat a continuously looping HTML media element as active media; the source code here keeps such playback alive indefinitely once triggered. This still needs confirmation that the user's runtime setting is actually `keepSessionAlive = 'sound'` before patching.
 
 ## Current interpretation
 
@@ -140,12 +162,12 @@ Confirmed:
 7. therefore the reported "infinite notification" behavior is **not explained by repeated `/notify` delivery into the relay** in this capture;
 8. user observation narrows the active symptom to Firefox while PocketRisu is in use;
 9. targeted browser-notification API grep found no matches in `src`, `static`, or `public`;
-10. browser media/audio grep found app-wide `new Audio(sendSound)` in `src/App.svelte`, which is now the leading browser-specific inspection target.
+10. `src/App.svelte` contains an app-wide infinite silent-audio loop for `keepSessionAlive = 'sound'`, with no cleanup handle in the inspected block.
 
 Do not patch the Termux relay or server producer based on this capture.
 
 ## Next diagnostic
 
-Inspect the `src/App.svelte` region around the `silentAudio = new Audio(sendSound)` call before making any browser-side change. Determine exactly what event triggers playback and whether the element is paused/released afterward.
+Confirm the current `keepSessionAlive` setting/default and its settings UI/source references. If the user's runtime configuration is `sound`, this path becomes the leading explanation for Firefox's persistent/repeated media notification behavior and should be fixed by replacing/removing the indefinite hidden-media strategy rather than adding notification suppression hacks.
 
 No Android notifications should ever be created on the server phone.
