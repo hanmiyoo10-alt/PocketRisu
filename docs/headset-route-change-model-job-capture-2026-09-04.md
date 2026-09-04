@@ -130,6 +130,24 @@ This confirms a real structural liveness bug: after headers are received, the re
 
 This does **not** prove that every headset route-change failure is caused by this exact browser behavior, but it proves that PocketRisu currently has no bounded recovery path for that failure mode.
 
+## Patch precheck
+
+Before modifying the streaming loop, the current local worktree was inspected.
+
+Observed status / hashes:
+
+- `src/ts/process/index.svelte.ts` is already locally modified; SHA-256 `8a8e10f7d87b5dce0897dbbb083df6f0ffeeb0154c41eec64ecb058a155eaf33`;
+- `src/ts/globalApi.svelte.ts` is already locally modified; SHA-256 `9c2fb3d453ea2b387f61cf91776e115ce81d0cb6c8e64112f1003614e0df066e`;
+- `src/ts/process/request/request.ts` is clean in the targeted status check; SHA-256 `7ff1e0de7a92b2912041c870f44ea2e68ee8f6704e3dccb0c3f41376ee1cc88a`.
+
+The existing local diff in `index.svelte.ts` is the native Termux notification work: request-start timing/metadata propagation and replacement of the old browser notification with `/api/termux-notify` completion notification. It does not modify the `reader.read()` loop shown in this investigation, so a carefully scoped streaming-liveness patch can avoid overlapping that existing change.
+
+The existing timeout configuration is `localNetworkTimeoutSec`, defaulting to `600` seconds. `request.ts` passes it as `requestTimeoutMs` for proxied/model-preset transport and as the model-job timeout. This means there is an existing user/database timeout value that can be reused rather than inventing an unrelated hard-coded deadline.
+
+One additional terminal-stage risk surfaced in the precheck: `src/ts/process/index.svelte.ts` awaits `sayTTS(currentChar, result)` when `DBState.db.ttsAutoSpeech` is enabled, and this happens before the later terminal generation cleanup. Therefore a TTS promise that itself becomes non-terminal can also keep the generation marked active even after the response stream has finished. This is consistent with the separate TTS audio-lifecycle concerns already under investigation, but it is not yet proven to be involved in this headset incident.
+
+Because `globalApi.svelte.ts` is also locally modified, do not patch it until its existing diff is inspected. The lower-conflict repair candidate is currently the main streaming loop in `index.svelte.ts`, but the exact terminal cleanup path must be inspected before deciding whether timeout should break, return, or throw.
+
 ## Current interpretation
 
 Confirmed:
@@ -143,21 +161,22 @@ Confirmed:
 7. the live request-log DB has not recorded current traffic since August 13 and is not usable to classify the 12:28 request route;
 8. the client has awaited stream-reader paths with generation cleanup only after terminal progress;
 9. `fetchNativeRaw(...)` definitely clears its request timeout after the `Response` is obtained, before a streaming body is necessarily finished;
-10. the main streaming reader loop has no independent inactivity timeout or bounded read deadline.
+10. the main streaming reader loop has no independent inactivity timeout or bounded read deadline;
+11. the target streaming file already contains unrelated local notification changes that must be preserved;
+12. auto-TTS is another possible post-stream non-terminal await because it occurs before terminal generation cleanup.
 
-A stuck durable model job is unlikely. The strongest current structural explanation is a client-side response-body stream that becomes non-terminal after a Firefox/Android route change, while the request timeout has already been cleared and no stream-read watchdog exists.
+A stuck durable model job is unlikely. The strongest current structural explanation remains a client-side response-body stream that becomes non-terminal after a Firefox/Android route change, while the request timeout has already been cleared and no stream-read watchdog exists. TTS remains a second, separate client-side liveness candidate if auto-speech is enabled.
 
 ## Next diagnostic / repair direction
 
 Do not add automatic page reload.
 
-Before modifying code, inspect the existing timeout settings and current local diff in `src/ts/process/index.svelte.ts` so the repair can reuse an appropriate configured timeout rather than hard-code a new arbitrary number.
+Before editing:
 
-The intended repair direction is:
+- inspect the current local diff in `src/ts/globalApi.svelte.ts`;
+- inspect the remaining terminal `sendChat` cleanup after the shown notification/TTS area to confirm exactly where `endGeneration(...)` and `clearPendingSend(...)` occur on success and thrown errors;
+- inspect the auto-TTS call site/setting only enough to avoid misattributing a post-stream TTS stall to the stream reader.
 
-- keep the existing external abort behavior;
-- add a bounded body-stream inactivity/read timeout around the main `reader.read()` path;
-- on timeout, cancel/abort the stream and allow the existing cleanup path to run;
-- ensure `isStreaming`, pending-send state, and generation state are released normally;
-- preserve any partial response already received;
-- never call `location.reload()` or otherwise refresh the page automatically.
+Then choose the smallest repair that guarantees a non-terminal body read can unwind into existing cleanup while preserving the unrelated notification modifications and any partial response already received.
+
+Automatic full-page reload remains forbidden as a recovery mechanism.
