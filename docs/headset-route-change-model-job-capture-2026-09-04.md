@@ -85,6 +85,30 @@ Therefore the request-log subsystem is not producing recent rows for current Poc
 
 Because request logging flushes rows only after a client request scope closes, even a working current logger would not guarantee a row for a presently hung request. In this deployment, however, the stronger issue is that no recent request rows have been written at all since August 13.
 
+## Client generation-state and fetch timeout inspection
+
+The client-side generation state and fetch transport were inspected without changing files.
+
+Observed generation-state behavior:
+
+- `generationStates` is memory-only;
+- `startGeneration(...)` inserts a live generation entry;
+- normal removal requires a later `endGeneration(...)` call;
+- there is no independent watchdog in `generationState.ts` that expires a live generation solely because it has been stuck for a long time;
+- the main send code contains multiple awaited stream reads, including `await reader.read()` in `src/ts/process/index.svelte.ts`.
+
+Observed `fetchNative` / `fetchNativeRaw` behavior:
+
+- `FetchNativeArgs` supports `requestTimeoutMs` and an external `AbortSignal`;
+- `fetchNativeRaw(...)` calls `buildTimeoutSignal(arg.signal, arg.requestTimeoutMs)` and passes the resulting signal to direct fetch, WebSocket proxy-job, and `/proxy2` branches;
+- however, `fetchNativeRaw(...)` executes `timeoutSignal.cleanup()` in its `finally` block;
+- for the normal `fetch(...)` and `/proxy2` branches, `fetchNativeRaw(...)` returns as soon as the `Response` object is obtained, before downstream code has consumed the streaming response body;
+- therefore the timeout helper's lifetime appears to end at **response acquisition / headers**, not necessarily at completion of the response body stream.
+
+This is a concrete structural candidate for the infinite-loading behavior. If an Android/Firefox route transition leaves an already-open response body's `reader.read()` pending without a clean end or error, the request-level timeout may already have been cleaned up and there is no generation-state watchdog to force terminal cleanup. In that case `endGeneration(...)` is never reached and the UI can remain indefinitely in the generating state even though SSH and server health remain normal.
+
+This is not yet classified as the proven root cause. The next inspection must verify the implementation of `buildTimeoutSignal(...)`, especially whether `cleanup()` clears the timeout and/or detaches the caller abort listener, and inspect the exact streaming reader loop(s) that consume the response to determine whether they have their own inactivity deadline or abort path.
+
 ## Current interpretation
 
 Confirmed:
@@ -95,19 +119,16 @@ Confirmed:
 4. there was no active main job, unclaimed terminal main job, or pending-send tombstone for the incident;
 5. therefore the 12:28 infinite-loading request did not leave any durable model-job state in the live server database;
 6. the request path only uses server jobs under a specific toggle/tools/preview gate and may fall back to proxied/direct transport;
-7. the live request-log DB has not recorded current traffic since August 13 and is not usable to classify the 12:28 request route.
+7. the live request-log DB has not recorded current traffic since August 13 and is not usable to classify the 12:28 request route;
+8. the client has awaited stream-reader paths with generation cleanup only after terminal progress;
+9. `fetchNativeRaw(...)` appears to clean up its request timeout immediately after returning a `Response`, before a streaming body is necessarily finished.
 
-A stuck durable model job is now unlikely. The stronger remaining candidates are:
-
-- a classic/direct or proxied request path that bypassed model jobs;
-- a ModelPreset request whose model-job creation failed and fell back before any durable row existed;
-- a client-side request pipeline hang before model-job creation;
-- a client-side stream/request that began but never reached terminal cleanup.
+A stuck durable model job is unlikely. The strongest current structural candidate is a client-side response-body stream that becomes non-terminal after a Firefox/Android route change, while the request timeout has already been cleaned up and no generation watchdog exists.
 
 ## Next diagnostic
 
 Keep the browser stuck if possible and do not patch or reload yet.
 
-Do not spend more time on `request-logs.db` for this reproduction. Instead inspect the current client request path and terminal cleanup directly: classic/preset dispatch, `fetchNative`/proxy transport, streaming reader loop, abort/timeout handling, and generation-state cleanup. The next goal is to identify a path where Firefox can keep a generation marked active after an audio-route transition without any backend outage or durable model job.
+Inspect `buildTimeoutSignal(...)` and the exact main streaming-reader loop(s), including any try/finally cleanup around `reader.read()`. Confirm whether a body-read inactivity timeout exists anywhere after the `Response` object is returned.
 
 Automatic full-page reload remains forbidden as a recovery mechanism.
