@@ -81,6 +81,17 @@ The log records a substantial connectivity outage earlier on 2026-09-04:
 
 The relay's most recent start/done pair occurred after connectivity had recovered. No evidence in the relay log shows a queued notification backlog replaying continuously after reconnection.
 
+## User scope clarification
+
+The user clarified that the repeated notification behavior occurs **only in Firefox while using PocketRisu**.
+
+This materially changes the diagnostic priority:
+
+- the Termux relay path is no longer the leading suspect for the visible repeated notification;
+- Firefox/PocketRisu browser-side notification behavior must be inspected first;
+- avoid changing the relay or server producer until browser-side notification sources are identified;
+- the earlier relay evidence remains useful because it independently shows no POST storm at the time of capture.
+
 ## Current interpretation
 
 Confirmed:
@@ -91,21 +102,20 @@ Confirmed:
 4. the real relay log shows normal discrete start/done pairs, not an endless POST storm;
 5. the latest captured pair was approximately 19:23:34 KST start and 19:24:54 KST done;
 6. the notify SSH tunnel had a long outage before reconnecting, but current evidence does not show backlog replay after reconnect;
-7. therefore the reported "infinite notification" behavior is **not explained by repeated `/notify` delivery into the relay** in this capture.
+7. therefore the reported "infinite notification" behavior is **not explained by repeated `/notify` delivery into the relay** in this capture;
+8. user observation narrows the active symptom to Firefox while PocketRisu is in use.
 
-Remaining candidates include:
+Remaining candidates now prioritize:
 
-- Android repeatedly surfacing/re-alerting the same active notification id 8472;
-- a different notification producer (for example another app/browser notification path) rather than the Termux relay;
-- a notification-channel/heads-up behavior that is independent of new relay POSTs;
-- another local producer invoking `termux-notification` outside `receiver.cjs`.
+- PocketRisu browser `Notification` usage;
+- service-worker / web-push notification paths;
+- Firefox site-notification behavior specific to the PocketRisu origin;
+- browser-side code repeatedly requesting or updating a notification.
 
-Do not patch the server producer or relay retry logic based on this capture, because no relay POST loop exists in the evidence.
+Do not patch the Termux relay or server producer based on this capture.
 
 ## Next diagnostic
 
-Stay on the main phone first.
-
-Capture the active Termux notification list while the repeated alert is visible and compare it with the relay's last log timestamp. The key question is whether the visible repeated alert is the single Termux notification id `8472` or belongs to a different notification source.
+Inspect PocketRisu browser-side notification sources first, with a minimal source grep for `Notification`, `showNotification`, `PushManager`, service-worker notification handlers, and related code paths.
 
 No Android notifications should ever be created on the server phone.
