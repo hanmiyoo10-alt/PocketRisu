@@ -53,30 +53,29 @@ Observed live process details:
 
 This removes the earlier uncertainty: the 12:32 read-only query was against the actual live model-job database.
 
-## Request-path source inspection
+## Request-selection source inspection
 
-The deployed request-selection source was inspected without modification.
+The deployed request path was inspected around `makeJobFetch` and `resolveChatModelBinding`.
 
-Key findings from `src/ts/process/request/request.ts`:
+Confirmed behavior:
 
-- model-preset dispatch is selected by `resolveChatModelBinding(...)` before the classic model path;
-- inside the model-preset request path, server-side jobs are used only when `getDatabase().nodeOnlyServerSideRequests === true`, there are no tool calls, and the request is not a preview;
-- when that condition is false, the model-preset request uses `proxiedFetch` directly instead of `makeJobFetch`;
-- when `makeJobFetch` is selected, job-creation network errors or non-OK creation responses other than 409 fall back to `proxiedFetch`;
-- `makeProxiedFetch` itself uses `fetchNative`, which tries a browser direct request and can fall back to `/proxy2` on CORS/network failure;
-- request logging wraps the selected transport and records the resulting route (`direct`, `proxy`, or `job`) once its scope closes.
+- ModelPreset selection is decided first by `resolveChatModelBinding(...)` in `requestChatDataMain`;
+- a ModelPreset request only uses `makeJobFetch` when `nodeOnlyServerSideRequests === true`, there are no tools, and the request is not a preview;
+- otherwise the request uses `proxiedFetch` directly;
+- `makeJobFetch` itself falls back to the same proxied/direct path when model-job creation throws or returns a non-OK status other than 409;
+- therefore the absence of a durable model-job row is compatible with either a non-job request path or job-creation fallback.
 
-Relevant gate:
+The request-log layer wraps the selected transport and can record route `direct`, `proxy`, or `job`. However, its entries are held client-side until the request scope closes and are POSTed to the server afterward. A tab/request that hangs before scope completion can therefore leave no request-log row for the stuck request.
 
-```ts
-const useServerJob = getDatabase().nodeOnlyServerSideRequests === true
-    && !tools && !arg.previewBody
-const transportFetch = useServerJob
-    ? makeJobFetch(...)
-    : proxiedFetch
-```
+## Request-log capture during the same failure
 
-This means an empty live `model-jobs.db` does **not** by itself imply a malfunction in the model-job subsystem. The request may legitimately have bypassed jobs because the server-side-request toggle was off, tools were active, the request was a preview, the chat resolved to the classic regime, or job creation fell back before a row was persisted.
+A read-only query of `$HOME/PocketRisu/save/request-logs.db` for `2026-09-04 12:20:00–12:35:00 KST` returned:
+
+- `rows=0`.
+
+The request-log DB, WAL, and SHM timestamps also look old, similar to the earlier model-job DB observation. Before treating the zero-row result as definitive evidence, the live PocketRisu process should be checked via `/proc/<pid>/fd` to confirm that this exact `request-logs.db` is the one currently opened by the server. The latest request-log rows should also be queried irrespective of timestamp to determine whether request logging is active/recent at all.
+
+Even if the path is confirmed live, `rows=0` would not by itself prove that no request began at 12:28: the client deliberately sends request-log entries only after the request scope closes, so the currently hung request may simply never have flushed its log entry.
 
 ## Current interpretation
 
@@ -86,14 +85,23 @@ Confirmed:
 2. server PocketRisu health was healthy during the failure;
 3. the live model-job DB contained no job created in the preceding three hours;
 4. there was no active main job, unclaimed terminal main job, or pending-send tombstone for the incident;
-5. the job transport is conditionally gated and can be bypassed or fall back to the direct/proxy path.
+5. therefore the 12:28 infinite-loading request did not leave any durable model-job state in the live server database;
+6. the request path only uses server jobs under a specific toggle/tools/preview gate and may fall back to proxied/direct transport;
+7. the 12:20–12:35 request-log query returned zero rows, but request-log path/activity still needs live-process confirmation before this is interpreted strongly.
 
-Therefore the 12:28 infinite-loading incident is not explained by a durable model job stuck in `running`. The remaining diagnostic priority is to identify the actual transport used by the failed request and whether its request-log scope ever closed.
+This strongly narrows the remaining possibilities. A stuck durable model job is now unlikely. The stronger remaining candidates are:
+
+- a classic/direct or proxied request path that bypassed model jobs;
+- a ModelPreset request whose model-job creation failed and fell back before any durable row existed;
+- a client-side request pipeline hang before model-job creation;
+- a client-side stream/request scope that began but never closed, which would also explain why no request-log row was flushed.
 
 ## Next diagnostic
 
 Keep the browser stuck if possible and do not patch or reload yet.
 
-Inspect the live request-log database around the 12:28 failure window and the runtime value of the server-side-request toggle if it can be obtained safely. Request-log rows should distinguish `direct`, `proxy`, and `job` when a scope completed; absence of a row may itself be meaningful because request-log entries are held until the scope closes.
+1. Confirm via `/proc/<pid>/fd` whether the live process has `$HOME/PocketRisu/save/request-logs.db` open.
+2. Query the latest few request-log rows regardless of timestamp to determine whether logging is active/recent.
+3. Only then interpret the 12:20–12:35 zero-row window.
 
 Automatic full-page reload remains forbidden as a recovery mechanism.
