@@ -103,11 +103,32 @@ Observed `fetchNative` / `fetchNativeRaw` behavior:
 - `fetchNativeRaw(...)` calls `buildTimeoutSignal(arg.signal, arg.requestTimeoutMs)` and passes the resulting signal to direct fetch, WebSocket proxy-job, and `/proxy2` branches;
 - however, `fetchNativeRaw(...)` executes `timeoutSignal.cleanup()` in its `finally` block;
 - for the normal `fetch(...)` and `/proxy2` branches, `fetchNativeRaw(...)` returns as soon as the `Response` object is obtained, before downstream code has consumed the streaming response body;
-- therefore the timeout helper's lifetime appears to end at **response acquisition / headers**, not necessarily at completion of the response body stream.
+- therefore the timeout helper's lifetime ends at **response acquisition / headers**, not at completion of the response body stream.
 
-This is a concrete structural candidate for the infinite-loading behavior. If an Android/Firefox route transition leaves an already-open response body's `reader.read()` pending without a clean end or error, the request-level timeout may already have been cleaned up and there is no generation-state watchdog to force terminal cleanup. In that case `endGeneration(...)` is never reached and the UI can remain indefinitely in the generating state even though SSH and server health remain normal.
+## Confirmed stream-lifetime timeout gap
 
-This is not yet classified as the proven root cause. The next inspection must verify the implementation of `buildTimeoutSignal(...)`, especially whether `cleanup()` clears the timeout and/or detaches the caller abort listener, and inspect the exact streaming reader loop(s) that consume the response to determine whether they have their own inactivity deadline or abort path.
+A follow-up inspection confirmed the exact helper and the main body-consumption loop.
+
+`buildTimeoutSignal(...)`:
+
+- creates a new `AbortController` when `timeoutMs > 0`;
+- schedules `setTimeout(() => controller.abort(), timeoutMs)`;
+- mirrors an external abort signal into the controller;
+- returns `cleanup: () => clearTimeout(timeoutId)`.
+
+`fetchNativeRaw(...)` calls that `cleanup()` in its `finally` block immediately after the transport promise resolves. For browser `fetch()`, that promise resolves once response headers are available; it does not wait for the streamed response body to finish.
+
+The main streaming reply path in `src/ts/process/index.svelte.ts` then obtains `req.result.getReader()` and performs:
+
+- `while (streamAborted === false)`;
+- `readed = await reader.read()`;
+- no `Promise.race`, inactivity timer, or per-read deadline around that `reader.read()`;
+- an abort listener exists, but it only reacts to the existing external `abortSignal`;
+- terminal cleanup of `isStreaming` and `reader.cancel()` is in a `finally`, but that `finally` cannot execute while `await reader.read()` remains unresolved.
+
+This confirms a real structural liveness bug: after headers are received, the request timeout is cleared while the body stream may still be open indefinitely. If Firefox/Android leaves that body stream in a non-terminal state after an audio-route transition, the client can wait forever. Because the send promise never unwinds, later generation cleanup such as `endGeneration(...)` is also not reached, leaving the UI stuck in the generating state even though the server and SSH path remain healthy.
+
+This does **not** prove that every headset route-change failure is caused by this exact browser behavior, but it proves that PocketRisu currently has no bounded recovery path for that failure mode.
 
 ## Current interpretation
 
@@ -121,14 +142,22 @@ Confirmed:
 6. the request path only uses server jobs under a specific toggle/tools/preview gate and may fall back to proxied/direct transport;
 7. the live request-log DB has not recorded current traffic since August 13 and is not usable to classify the 12:28 request route;
 8. the client has awaited stream-reader paths with generation cleanup only after terminal progress;
-9. `fetchNativeRaw(...)` appears to clean up its request timeout immediately after returning a `Response`, before a streaming body is necessarily finished.
+9. `fetchNativeRaw(...)` definitely clears its request timeout after the `Response` is obtained, before a streaming body is necessarily finished;
+10. the main streaming reader loop has no independent inactivity timeout or bounded read deadline.
 
-A stuck durable model job is unlikely. The strongest current structural candidate is a client-side response-body stream that becomes non-terminal after a Firefox/Android route change, while the request timeout has already been cleaned up and no generation watchdog exists.
+A stuck durable model job is unlikely. The strongest current structural explanation is a client-side response-body stream that becomes non-terminal after a Firefox/Android route change, while the request timeout has already been cleared and no stream-read watchdog exists.
 
-## Next diagnostic
+## Next diagnostic / repair direction
 
-Keep the browser stuck if possible and do not patch or reload yet.
+Do not add automatic page reload.
 
-Inspect `buildTimeoutSignal(...)` and the exact main streaming-reader loop(s), including any try/finally cleanup around `reader.read()`. Confirm whether a body-read inactivity timeout exists anywhere after the `Response` object is returned.
+Before modifying code, inspect the existing timeout settings and current local diff in `src/ts/process/index.svelte.ts` so the repair can reuse an appropriate configured timeout rather than hard-code a new arbitrary number.
 
-Automatic full-page reload remains forbidden as a recovery mechanism.
+The intended repair direction is:
+
+- keep the existing external abort behavior;
+- add a bounded body-stream inactivity/read timeout around the main `reader.read()` path;
+- on timeout, cancel/abort the stream and allow the existing cleanup path to run;
+- ensure `isStreaming`, pending-send state, and generation state are released normally;
+- preserve any partial response already received;
+- never call `location.reload()` or otherwise refresh the page automatically.
