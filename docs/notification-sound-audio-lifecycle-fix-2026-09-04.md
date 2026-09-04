@@ -126,7 +126,30 @@ Observed result:
 
 Classification: **BASIC_RUNTIME_SMOKE_PASS**.
 
-This confirms the bounded `HTMLAudioElement` lifecycle patch is functional in the ordinary completion-sound path. It does not yet prove the more specific Android audio-route cases (call / Discord voice / headset connect-disconnect) are fully fixed; those remain a separate stress/A-B test.
+This confirms the bounded `HTMLAudioElement` lifecycle patch is functional in the ordinary completion-sound path. It does not prove the more specific Android audio-route cases are fixed.
+
+## Headset route-change failure capture
+
+A real headset-connect test immediately reproduced the remaining failure: PocketRisu entered the reported infinite-loading state after the headset route change.
+
+The failure was captured from the main phone at `2026-09-04 12:28:14 KST` without refreshing the page first.
+
+Observed main-phone state while the UI was still stuck:
+
+- `pocketrisu-ssh-tunnel`: running continuously, PID `1693`, service age about `23445s`;
+- `pocketrisu-notify-tunnel`: running continuously, PID `5878`, service age about `23436s`;
+- the expected SSH `-L 127.0.0.1:6001:127.0.0.1:6001` core forward was present;
+- forwarded `127.0.0.1:6001/api/health` returned HTTP `200`;
+- the `curl: (23) client returned ERROR on write` message came from writing the response body to `/tmp/...` on Termux, while the HTTP status itself was still successfully received as `200`; future capture commands should use `$TMPDIR` or discard the response body directly;
+- the filtered `logcat` section returned no audio-route lines. This is not evidence that no Android audio event occurred; Termux may not have permission/visibility for the relevant system log buffer.
+
+Classification: **HEADSET_ROUTE_CHANGE_FAIL / BACKEND_PATH_HEALTHY_AT_CAPTURE**.
+
+### Interpretation
+
+This materially narrows the failure domain. During the stuck state, the main-phone SSH transport and forwarded PocketRisu core health path remained alive, so the headset-triggered infinite-loading symptom is not explained by a core tunnel outage at that checkpoint.
+
+The bounded completion `HTMLAudioElement` patch therefore fixes the ordinary playback lifecycle but does **not** by itself fix the headset route-change failure. The next diagnostic step is to inspect server-side request/job/log state from the same failure window before changing more client code. The key question is whether the model request completed server-side while the browser remained stuck, or whether the request itself was still active. No automatic page reload should be added as recovery.
 
 ## Deployment status at this checkpoint
 
@@ -140,9 +163,10 @@ This confirms the bounded `HTMLAudioElement` lifecycle patch is functional in th
 - service restart: not required for frontend activation
 - browser runtime activation: PASS after one user-controlled manual refresh
 - ordinary completion-sound runtime smoke test: PASS
-- additional recovery refresh after the test: not required
-- behavioral validation around call / Discord / headset route changes: pending
+- headset route-change stress test: **FAIL**
+- main-phone core/SSH path during stuck state: **HEALTHY**
+- server-side request/job state during that same window: pending inspection
 
 ## Interpretation
 
-This patch removes a concrete unbounded/abandoned `HTMLAudioElement` lifecycle in the exact automatic completion-sound path and now has a successful ordinary runtime smoke test. It is a strong first repair for the sound-related manual-refresh complaint, but it does not yet prove that Android/Firefox audio-focus or route-transition issues are fully fixed. Runtime A/B testing around call/Discord/headset transitions is still required.
+This patch removes a concrete unbounded/abandoned `HTMLAudioElement` lifecycle in the exact automatic completion-sound path and has a successful ordinary runtime smoke test. However, a real headset connect/disconnect route change still reproduces the infinite-loading symptom while the main SSH tunnel and forwarded core health remain available. The remaining failure is therefore narrower than the original audio-element leak and requires request/job/client-state correlation before any further patch.
