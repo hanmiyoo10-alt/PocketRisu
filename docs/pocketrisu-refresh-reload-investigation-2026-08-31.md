@@ -92,6 +92,23 @@ Therefore a long browsing session can retain a much larger rendered chat DOM tha
 
 A likely OOM mitigation is a **soft DOM trim**: reduce `loadPages` back toward its normal window at safe moments (for example after returning to the latest-message region and on chat changes), and guarantee screenshot restoration in `finally`. This discards only rendered component/DOM instances; it must not discard chat messages or trigger a page reload.
 
+### 8. Completion notification sound has an unbounded fire-and-forget HTMLAudio lifecycle
+
+The deployed server-phone source was inspected directly on 2026-08-31. `src/ts/notificationSound.ts` SHA-256 was `fd02126623671b376921c53ce3fa6c37619f8fbf1d888fcd3b620109cdd8e7c7`.
+
+The automatic completion-sound path is separate from TTS and is a more direct candidate for the reported "sound event makes the client get stuck until reload" symptom:
+
+- `playNotificationSound()` constructs a fresh `new Audio(...)` for every completion sound.
+- The automatic playback element is kept only in a local variable; there is no module-level owner for the active completion sound.
+- There is no explicit `pause()`, `src` release, `load()` reset, `ended` cleanup, or error cleanup for that automatic channel.
+- A second completion sound cannot explicitly stop/release the first one because the previous element is no longer addressable from the module.
+- The message-complete call site is `src/lib/ChatScreens/DefaultChatScreen.svelte` and the translation-complete call site is `src/ts/translator/translator.ts`.
+- Both inspected call sites invoke `playNotificationSound(...)` without awaiting it, so the sound function is intentionally fire-and-forget and should not be used as a page-level recovery mechanism.
+
+The preview picker is different: it already keeps one `previewAudio` reference and pauses the previous preview before starting another, although its ended/error cleanup can also be improved later.
+
+This does not prove Android/Firefox audio focus or route changes are the sole cause of the UI-stuck symptom. It does establish a concrete lifecycle weakness in the exact automatic completion-sound path. The first repair should therefore be a **single bounded completion-sound channel with explicit stop/release on replacement/end/error**, while preserving fire-and-forget behavior and never reloading the page. After that repair, call/Discord/headset route-change A/B testing can determine whether additional interruption handling is needed.
+
 ## Working taxonomy for the next investigation
 
 Do not use "refresh" as one diagnosis. Separate at least:
@@ -101,16 +118,17 @@ Do not use "refresh" as one diagnosis. Separate at least:
 3. **Network return** — `online` fires after connectivity loss.
 4. **Generation/job recovery** — server-side job is rediscovered/reattached/slot-in occurs.
 5. **Chat persistence verification** — reload is used to prove whether a UI-visible write was really saved.
-6. **UI/reactivity/audio reset** — reload may appear to fix stale client state even when backend state is healthy; audio now has a concrete lifecycle defect under investigation.
+6. **UI/reactivity/audio reset** — reload may appear to fix stale client state even when backend state is healthy; audio now has concrete lifecycle defects under investigation.
 7. **OOM/content-process reconstruction** — Firefox/Android kills the page under memory pressure and reconstructs it, which feels like an unwanted automatic refresh but is not an intentional PocketRisu `location.reload()`.
 
 ## Current conclusion
 
 There is already strong source/history evidence that some past "새로고침하면 살아남/살아남지 않음" reports were not fundamentally about page reload itself. Full reload acted as a catch-all recovery trigger and as a persistence test. PocketRisu now has explicit foreground and network-return recovery intended to remove that dependency for server-side model jobs.
 
-For the two current high-priority refresh complaints, source inspection has produced two concrete first targets without introducing automatic reload:
+For the two current high-priority refresh complaints, source inspection has produced three concrete first targets without introducing automatic reload:
 
-1. Fix TTS `AudioContext`/source ownership and cleanup so audio can recover independently of the page and does not accumulate abandoned audio resources.
-2. Make chat rendering memory self-trimming by bounding `loadPages` again at safe points and restoring screenshot render range in `finally`.
+1. Bound the automatic completion-notification HTMLAudio lifecycle so only one owned channel exists and it is explicitly released on replacement/end/error.
+2. Fix TTS `AudioContext`/source ownership and cleanup so audio can recover independently of the page and does not accumulate abandoned audio resources.
+3. Make chat rendering memory self-trimming by bounding `loadPages` again at safe points and restoring screenshot render range in `finally`.
 
-Broader Firefox OOM investigation should continue after these concrete leaks/retention paths are fixed; neither finding alone is yet claimed to explain every OOM event.
+Broader Firefox OOM investigation should continue after these concrete leaks/retention paths are fixed; none of the findings alone is yet claimed to explain every OOM event.
