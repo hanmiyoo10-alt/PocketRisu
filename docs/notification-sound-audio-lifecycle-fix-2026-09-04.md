@@ -89,11 +89,42 @@ Observed build environment/output:
 
 The build emitted pre-existing/non-blocking warnings including Svelte accessibility warnings, CSS `::highlight(...)` parser/minifier warnings, browser-externalized Node modules from dependencies, plugin timing warnings, large chunk warnings, and ineffective dynamic import warnings. None caused build failure.
 
+## Runtime serving inspection
+
+The active server-phone runit service was inspected after the successful build.
+
+Observed state:
+
+- service: `$PREFIX/var/service/pocketrisu`
+- status: running as PID `17599` at the inspection checkpoint
+- run script changes directory to `$HOME/PocketRisu` and executes `node server/node/server.cjs`
+- process cwd: `$HOME/PocketRisu`
+- `server/node/server.cjs` serves `/assets` from `dist/assets` via `express.static(...)`
+- the remaining static frontend is served directly from `dist` via `express.static(..., { index: false, maxAge: 0 })`
+- server code also reads `dist/index.html` from the same checkout
+- freshly built `dist/index.html` mtime: `2026-09-04 11:50:26 +0900`
+- core health remained HTTP `200`
+
+### Runtime interpretation
+
+A `pocketrisu` service restart is **not required merely to expose this frontend build**: the running Node process serves the `dist` directory from disk rather than embedding the old frontend bundle in process memory.
+
+The existing Firefox tab still holds the JavaScript bundle it loaded before the build. Therefore activation for testing requires one **user-initiated manual page refresh** (or reopening the page) so Firefox fetches the new `dist` bundle. No automatic reload is added or required.
+
+This preserves the project policy: automatic refresh is not a recovery mechanism; the single refresh here is only a deliberate deployment/test boundary chosen by the user.
+
 ## Deployment status at this checkpoint
 
-The source patch and production build are validated on the server phone, but the `pocketrisu` service had **not yet been restarted** at this checkpoint. Runtime activation and behavior testing must therefore be treated as pending.
-
-Before restarting, inspect the active `pocketrisu` runit service/run script and process command line to confirm exactly how it serves the built `dist` output. After activation, verify health first and then test completion-sound behavior without page reload.
+- source patch: PASS
+- source backup: PASS
+- `git diff --check`: PASS
+- `svelte-check`: PASS (`0` errors)
+- production build: PASS
+- backend health after build: PASS (`HTTP 200`)
+- frontend `dist` serving path: confirmed live from disk
+- service restart: not required for frontend activation
+- browser runtime activation: pending one user-controlled manual refresh/reopen
+- behavioral validation around completion sound / call / Discord / headset route changes: pending
 
 ## Interpretation
 
