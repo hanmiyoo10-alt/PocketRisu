@@ -111,6 +111,22 @@ Interpretation:
 - the symptom can still be Firefox-specific without using the Web Notifications API, for example repeated media/foreground-service/browser UI notifications associated with active audio or media state;
 - next inspection should therefore search broader media/audio/session APIs rather than patching the Termux notification relay.
 
+## Media/audio source grep
+
+A broader grep for `mediaSession`, `MediaSession`, `AudioContext`, `new Audio(...)`, `HTMLAudioElement`, and `audio.play(...)` found several audio paths.
+
+Notable hits:
+
+- `src/App.svelte:116` creates `const silentAudio = new Audio(sendSound);`;
+- `src/ts/notificationSound.ts` owns automatic/preview notification audio elements;
+- `src/ts/process/tts.ts` creates WebAudio `AudioContext` instances;
+- `src/ts/observer.svelte.ts` owns a BGM `HTMLAudioElement`;
+- Playground-specific code also creates audio elements and audio contexts.
+
+No `MediaSession` / `navigator.mediaSession` hit appeared in the shown result.
+
+The app-wide `src/App.svelte` silent-audio creation is the highest-priority next inspection because it is not limited to Playground/TTS usage and could cause Firefox to consider the PocketRisu tab an active media source. This is only a candidate until the surrounding trigger/lifecycle code is inspected.
+
 ## Current interpretation
 
 Confirmed:
@@ -123,14 +139,13 @@ Confirmed:
 6. the notify SSH tunnel had a long outage before reconnecting, but current evidence does not show backlog replay after reconnect;
 7. therefore the reported "infinite notification" behavior is **not explained by repeated `/notify` delivery into the relay** in this capture;
 8. user observation narrows the active symptom to Firefox while PocketRisu is in use;
-9. targeted browser-notification API grep found no matches in `src`, `static`, or `public`.
-
-Remaining candidates now prioritize Firefox behavior associated with PocketRisu media/audio activity rather than direct Web Notification API calls.
+9. targeted browser-notification API grep found no matches in `src`, `static`, or `public`;
+10. browser media/audio grep found app-wide `new Audio(sendSound)` in `src/App.svelte`, which is now the leading browser-specific inspection target.
 
 Do not patch the Termux relay or server producer based on this capture.
 
 ## Next diagnostic
 
-Inspect PocketRisu source for media/audio/session APIs that can make Firefox expose persistent or repeatedly updated browser notifications, such as `MediaSession`, `navigator.mediaSession`, HTML media playback, AudioContext, and audio element creation.
+Inspect the `src/App.svelte` region around the `silentAudio = new Audio(sendSound)` call before making any browser-side change. Determine exactly what event triggers playback and whether the element is paused/released afterward.
 
 No Android notifications should ever be created on the server phone.
