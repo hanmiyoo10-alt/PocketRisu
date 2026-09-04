@@ -113,6 +113,21 @@ The existing Firefox tab still holds the JavaScript bundle it loaded before the 
 
 This preserves the project policy: automatic refresh is not a recovery mechanism; the single refresh here is only a deliberate deployment/test boundary chosen by the user.
 
+## Runtime smoke validation
+
+After one user-controlled manual refresh to load the rebuilt frontend bundle, the user performed the basic completion-sound smoke test.
+
+Observed result:
+
+- completion response path worked;
+- completion notification sound played normally;
+- the PocketRisu UI remained usable afterward;
+- no additional page refresh was required for recovery.
+
+Classification: **BASIC_RUNTIME_SMOKE_PASS**.
+
+This confirms the bounded `HTMLAudioElement` lifecycle patch is functional in the ordinary completion-sound path. It does not yet prove the more specific Android audio-route cases (call / Discord voice / headset connect-disconnect) are fully fixed; those remain a separate stress/A-B test.
+
 ## Deployment status at this checkpoint
 
 - source patch: PASS
@@ -123,9 +138,11 @@ This preserves the project policy: automatic refresh is not a recovery mechanism
 - backend health after build: PASS (`HTTP 200`)
 - frontend `dist` serving path: confirmed live from disk
 - service restart: not required for frontend activation
-- browser runtime activation: pending one user-controlled manual refresh/reopen
-- behavioral validation around completion sound / call / Discord / headset route changes: pending
+- browser runtime activation: PASS after one user-controlled manual refresh
+- ordinary completion-sound runtime smoke test: PASS
+- additional recovery refresh after the test: not required
+- behavioral validation around call / Discord / headset route changes: pending
 
 ## Interpretation
 
-This patch removes a concrete unbounded/abandoned `HTMLAudioElement` lifecycle in the exact automatic completion-sound path. It is a strong first repair for the sound-related manual-refresh complaint, but it does not yet prove that Android/Firefox audio-focus or route-transition issues are fully fixed. Runtime A/B testing around call/Discord/headset transitions is still required.
+This patch removes a concrete unbounded/abandoned `HTMLAudioElement` lifecycle in the exact automatic completion-sound path and now has a successful ordinary runtime smoke test. It is a strong first repair for the sound-related manual-refresh complaint, but it does not yet prove that Android/Firefox audio-focus or route-transition issues are fully fixed. Runtime A/B testing around call/Discord/headset transitions is still required.
