@@ -73,9 +73,17 @@ A read-only query of `$HOME/PocketRisu/save/request-logs.db` for `2026-09-04 12:
 
 - `rows=0`.
 
-The request-log DB, WAL, and SHM timestamps also look old, similar to the earlier model-job DB observation. Before treating the zero-row result as definitive evidence, the live PocketRisu process should be checked via `/proc/<pid>/fd` to confirm that this exact `request-logs.db` is the one currently opened by the server. The latest request-log rows should also be queried irrespective of timestamp to determine whether request logging is active/recent at all.
+A follow-up live-process check confirmed that this is the request-log DB actually opened by PID `17599`:
 
-Even if the path is confirmed live, `rows=0` would not by itself prove that no request began at 12:28: the client deliberately sends request-log entries only after the request scope closes, so the currently hung request may simply never have flushed its log entry.
+- `/proc/17599/fd/26` → `$HOME/PocketRisu/save/request-logs.db`;
+- `/proc/17599/fd/27` → `$HOME/PocketRisu/save/request-logs.db-wal`;
+- `/proc/17599/fd/28` → `$HOME/PocketRisu/save/request-logs.db-shm`.
+
+The DB contains exactly 300 request rows, but the newest row is from `2026-08-13 23:35:13 KST`; the ten latest rows are all from August 13 and use `source=other`, `route=direct`, `status=200`, `success=1`.
+
+Therefore the request-log subsystem is not producing recent rows for current PocketRisu traffic. The 12:28 zero-row window cannot be used to infer whether the stuck request began, selected `direct`/`proxy`/`job`, or failed to close. The DB is live/open but diagnostically stale for this incident.
+
+Because request logging flushes rows only after a client request scope closes, even a working current logger would not guarantee a row for a presently hung request. In this deployment, however, the stronger issue is that no recent request rows have been written at all since August 13.
 
 ## Current interpretation
 
@@ -87,21 +95,19 @@ Confirmed:
 4. there was no active main job, unclaimed terminal main job, or pending-send tombstone for the incident;
 5. therefore the 12:28 infinite-loading request did not leave any durable model-job state in the live server database;
 6. the request path only uses server jobs under a specific toggle/tools/preview gate and may fall back to proxied/direct transport;
-7. the 12:20–12:35 request-log query returned zero rows, but request-log path/activity still needs live-process confirmation before this is interpreted strongly.
+7. the live request-log DB has not recorded current traffic since August 13 and is not usable to classify the 12:28 request route.
 
-This strongly narrows the remaining possibilities. A stuck durable model job is now unlikely. The stronger remaining candidates are:
+A stuck durable model job is now unlikely. The stronger remaining candidates are:
 
 - a classic/direct or proxied request path that bypassed model jobs;
 - a ModelPreset request whose model-job creation failed and fell back before any durable row existed;
 - a client-side request pipeline hang before model-job creation;
-- a client-side stream/request scope that began but never closed, which would also explain why no request-log row was flushed.
+- a client-side stream/request that began but never reached terminal cleanup.
 
 ## Next diagnostic
 
 Keep the browser stuck if possible and do not patch or reload yet.
 
-1. Confirm via `/proc/<pid>/fd` whether the live process has `$HOME/PocketRisu/save/request-logs.db` open.
-2. Query the latest few request-log rows regardless of timestamp to determine whether logging is active/recent.
-3. Only then interpret the 12:20–12:35 zero-row window.
+Do not spend more time on `request-logs.db` for this reproduction. Instead inspect the current client request path and terminal cleanup directly: classic/preset dispatch, `fetchNative`/proxy transport, streaming reader loop, abort/timeout handling, and generation-state cleanup. The next goal is to identify a path where Firefox can keep a generation marked active after an audio-route transition without any backend outage or durable model job.
 
 Automatic full-page reload remains forbidden as a recovery mechanism.
