@@ -188,8 +188,18 @@ The exact diff confirms the intended writer-handoff behavior:
 
 At this point the three automatic full-page reload effects in this writer-handoff block are removed in the local source while server-side 423 rejection and visible conflict signaling remain intact.
 
-One cleanup item remains before build validation: the nearby comments still describe the old reload-on-return behavior and should be updated to match the new manual-refresh-only semantics. The old `risu-session-handoff-reload` cleanup block is now legacy/dead for this path and should be reviewed rather than silently left misleading.
+## Postpatch symbol/comment grep
+
+A follow-up grep of `gotChannel`, `risu-session-handoff-reload`, and reload-on-return comments found:
+
+- `gotChannel` definition and the three conflict/stale assignments;
+- the new `checkWriterLockOnReturn()` short-circuit;
+- a later `gotChannel` use around line 808 that still needs inspection before build, because it may be the actual save blocker and therefore is part of the safety model;
+- legacy comments around lines 387/398 still describe the old reload-on-return design;
+- the old `risu-session-handoff-reload` cleanup block around lines 427-431 remains even though the foreground stale path no longer writes that marker.
+
+Do not remove the later `gotChannel` use or dead-marker block blindly until the save path around line 808 is inspected.
 
 ## Next step
 
-Inspect all `gotChannel` uses and the nearby stale/handoff comments before finalizing. Then make a comment/dead-marker cleanup patch if needed, followed by `svelte-check`/build and a manual browser reload for runtime testing.
+Inspect the `gotChannel` use around line 808. If it confirms that `gotChannel` blocks further saves after a conflict/stale warning, keep that safety behavior, then clean only the misleading comments and legacy handoff marker cleanup before running `svelte-check` and a build.
