@@ -131,6 +131,10 @@ The current server-phone working file was inspected before any change.
 
 This matters because the upcoming manual-refresh-only repair can be made on top of these existing edits without overwriting them. The current automatic `location.reload()` calls are pre-existing behavior relative to the shown local diff, not introduced by those local changes.
 
-## Next step
+## Backup before patch
 
-Create a timestamped backup of the current `src/ts/globalApi.svelte.ts` before patching. Then apply the smallest targeted change that removes only automatic full-page reload behavior while preserving writer-lock rejection and visible conflict/stale signaling.
+A timestamped backup was created successfully before any manual-refresh-only edit:
+
+`src/ts/globalApi.svelte.ts.bak-manual-refresh-20260905-213753`
+
+The source working file was still the inspected prepatch version at the time the backup was taken. The next safe step is to verify the source and backup hashes match before modifying the working file.
