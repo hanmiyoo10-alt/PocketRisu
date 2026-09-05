@@ -139,6 +139,16 @@ The local scroll-restoration modification changed both handlers to additionally 
 
 So the expensive hide-time scroll scan is not merely adjacent to existing upstream behavior; it was introduced by the same local modification that added scroll restoration. This substantially strengthens it as a regression candidate for app-switch pressure. The rest of the scroll-restoration feature can be preserved because ordinary scroll activity already uses `scheduleChatScrollSave(...)` with a 120 ms debounce.
 
+## Reference-count confirmation
+
+A direct grep of `persistChatScrollNow` in the working file returned exactly three references:
+
+- line 181: the helper definition;
+- line 369: the `visibilitychange -> hidden` call;
+- line 374: the `pagehide` call.
+
+There are no other callers. This means the immediate hide-time full-DOM/layout scan can be removed surgically by deleting the two hide/pagehide calls and then removing the now-unused helper, while leaving draft persistence and normal debounced scroll snapshots intact.
+
 ## Next patch direction
 
-Before editing, confirm every `persistChatScrollNow` reference. If it is only the helper definition plus the two hide/pagehide calls, make a narrow backup-backed patch that removes the hide/pagehide immediate scroll scan while leaving draft persistence and ordinary debounced scroll snapshot saving intact. Then run `git diff --check` and `pnpm check` before a production build/runtime test. Do not add any automatic page reload.
+Proceed with backup first. Then make the smallest patch that removes only `persistChatScrollNow()` and its two hide/pagehide calls. Preserve `persistDraftNow()`, `scheduleChatScrollSave(...)`, `writeChatScrollSnapshot(...)`, scroll restoration, and manual-refresh-only behavior. Verify with `git diff --check` and `pnpm check` before a production build/runtime test.
