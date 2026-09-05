@@ -61,23 +61,28 @@ The notable lifecycle hits are handlers rather than navigations:
 
 So there is currently no source evidence of another explicit foreground-return navigation/reload call.
 
-## Hide-time forced save path confirmed
+## Hide-time save path: forced full DB hypothesis weakened
 
-Inspection of `src/ts/globalApi.svelte.ts` around lines 501-516 shows that backgrounding the page deliberately forces the save path:
+Inspection of `triggerSave()` around lines 1057-1099 shows that the hide callback does not automatically force a full DB write:
 
-- `flushImmediate()` clears any pending save timeout;
-- it unconditionally sets `changed = true`;
-- it immediately calls `triggerSave({ skipBroadcast: true })` without awaiting it;
-- it then calls `flushServerDbKeepalive()`;
-- `visibilitychange -> hidden` calls `flushImmediate()`;
-- `pagehide` also calls the same function.
+- `triggerSave()` first calls `takeTrackedChanges()`;
+- if there are no tracked changes and `forceFullWrite` is not set, it returns immediately;
+- the hide path calls `triggerSave({ skipBroadcast: true })` without `forceFullWrite`;
+- `saveInFlight` also prevents duplicate concurrent saves.
 
-The current local version of `flushServerDbKeepalive()` has already been reduced to a no-op, so the remaining hide-time work of interest is the forced `triggerSave()` call itself.
+Therefore `flushImmediate()` setting `changed = true` on hide does not by itself prove that every app switch serializes/writes the full DB. The earlier heavy-save hypothesis is weaker than it first appeared.
 
-Because `changed` is set to true even if there was no actual user change, every app switch/background transition can force the persistence path. That is a concrete source-level candidate for CPU/memory/serialization pressure at exactly the moment Firefox is being backgrounded, though it is not yet proof that this causes the browser reconstruction.
+## Chat-screen hide handlers confirmed
 
-Do not patch this blindly yet. Inspect `triggerSave()` and the persistence path first to determine whether it performs a full DB serialization/write or can otherwise allocate heavily on each hide.
+Inspection of `src/lib/ChatScreens/DefaultChatScreen.svelte` around lines 363-382 shows a second app-hide/pagehide persistence path:
+
+- on `visibilitychange -> hidden`, it calls `persistDraftNow()` and `persistChatScrollNow()`;
+- on `pagehide`, it calls the same two functions again;
+- listeners are installed inside a Svelte effect and removed in its cleanup;
+- comments explicitly say this exists for refresh/app switch/hard teardown persistence.
+
+This means an Android app switch can trigger both the global save path and the chat-screen draft/scroll persistence path, potentially twice if `visibilitychange` and `pagehide` both occur. That still does not prove OOM or reconstruction, but these exact hide-time functions are now the next app-side candidates to inspect for synchronous work, large serialization, storage writes, or duplicate persistence.
 
 ## Next pivot
 
-Inspect the implementation and immediate callees of `triggerSave()` in `globalApi.svelte.ts`, especially whether the hide-forced path serializes/writes the full DB or large tracked structures. If it is heavy, patching the hide behavior should preserve ordinary debounced saving and must not introduce any automatic reload.
+Inspect the definitions of `persistDraftNow()` and `persistChatScrollNow()` before changing anything. If they are tiny writes, app-side hide work becomes much less plausible as the direct cause and the investigation should move to Firefox/Android content-process reconstruction evidence. If either performs large cloning/serialization/network/database work, patch only that hide-time behavior while preserving normal draft/scroll persistence and manual-only refresh.
