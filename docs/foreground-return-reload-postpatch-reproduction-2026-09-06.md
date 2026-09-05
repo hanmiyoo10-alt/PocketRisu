@@ -103,6 +103,15 @@ A source grep located the two helper implementations exactly:
 
 No modification was made from this result alone. The next step is to inspect only those helper bodies to decide whether the hide-time work is small enough to rule out as the likely reconstruction trigger.
 
+## Helper cost inspection
+
+The helper bodies show two different cost profiles:
+
+- `flushChatDraft(...)` only cancels the pending debounce and enqueues `persistSave(...)`; there is no full chat/DB serialization in this wrapper.
+- `writeChatScrollSnapshot(...)` is more interesting: it gathers loaded message elements, reads the chat container layout, then scans message elements using `getBoundingClientRect()` to find the visible item and reads its rectangle again before saving a small snapshot.
+
+So draft persistence looks lightweight, while scroll persistence can force synchronous DOM/layout work exactly during `visibilitychange -> hidden` / `pagehide`. Its cost grows with the number of currently rendered/loaded message elements, so it is a plausible pressure amplifier when `loadPages` has grown large. This is still not proof that it causes Firefox reconstruction.
+
 ## Next pivot
 
-Inspect the exact bodies of `writeChatScrollSnapshot(...)` and `flushChatDraft(...)`. If they are small local/network writes, the app-side hide-work hypothesis becomes weak enough to pivot to Firefox/Android page-discard/OOM instrumentation. If either performs large synchronous serialization or expensive work, patch only that helper path while preserving normal draft/scroll persistence and manual-only refresh.
+Inspect `getLoadedMessages(...)` and the remainder of `writeChatScrollSnapshot(...)` before modifying anything. If it scans all rendered message nodes and writes only a tiny snapshot, the likely optimization is to avoid or bound hide-time layout scanning rather than touching DB persistence. Keep manual-refresh-only behavior.
