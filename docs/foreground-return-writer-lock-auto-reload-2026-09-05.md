@@ -216,4 +216,14 @@ This gives the desired manual-refresh behavior: conflict/stale is surfaced visib
 - all four warnings are accessibility warnings in `src/lib/ChatScreens/DefaultChatScreen.svelte` around lines 1288 and 1302 (`div` click handlers without keyboard/ARIA handling);
 - there were no errors in `globalApi.svelte.ts` and no new compile/type diagnostic attributable to the manual-refresh patch.
 
-The remaining cleanup before build is non-functional: update the stale reload-era comments and remove the legacy `risu-session-handoff-reload` cleanup block, then re-run diff/static validation and build.
+## Reload-era cleanup applied locally
+
+The non-functional cleanup patch completed with `CLEANUP_OK`.
+
+- pre-cleanup SHA-256 guard matched `0c1ee78e322895a29b993138942afa8e7922f87c16426be56a9f935a55740690`;
+- post-cleanup SHA-256 is `8f91216bc98c437ad596d570527385136306c9a2e96f49f143ae945e5322ccdd`;
+- stale comments describing automatic reload behavior were replaced with comments describing the manual-refresh-only conflict blocking behavior;
+- the legacy `risu-session-handoff-reload` cleanup block was removed;
+- no intended functional save/lock behavior was changed by this cleanup.
+
+The next step is a diff/static sanity check on the cleaned file, then a production build before browser runtime testing.
