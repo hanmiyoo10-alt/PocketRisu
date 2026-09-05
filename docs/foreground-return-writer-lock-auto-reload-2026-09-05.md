@@ -46,16 +46,18 @@ The nearby `/api/session` boot endpoint registers the client session via `sessio
 
 Therefore the actual state machine that can falsely produce `stale` is inside the `sessionLock` implementation, especially `peek(...)` and any write/revision bookkeeping it consults. The HTTP endpoint is only a thin wrapper.
 
-## Session-lock instance location
+## Session-lock implementation located
 
-A source grep found the single server-side instance creation at `server/node/server.cjs:2174`:
+A server-tree grep located the exact implementation:
 
-`const sessionLock = createSessionLock();`
+- `server/node/server.cjs:2173` imports `createSessionLock` from `./session-lock.cjs`;
+- `server/node/server.cjs:2174` creates the single `sessionLock` instance;
+- `server/node/session-lock.cjs:40` defines `createSessionLock(opts = {})`;
+- `server/node/session-lock.cjs:110` exports it;
+- `server/node/session-lock.test.ts` contains direct tests for the helper.
 
-The only shown direct method uses in `server.cjs` are the foreground status call through `sessionLock.peek(...)` and boot registration through `sessionLock.register(...)`.
-
-A direct grep for a local `function createSessionLock`, `const createSessionLock`, or `createSessionLock =` definition inside `server/node/server.cjs` returned no matches. This means the helper is likely imported or defined in another server file rather than inline in `server.cjs`; do not guess its behavior from the call site alone.
+This resolves the previous ambiguity: the stale state machine is not inline in `server.cjs`; it is implemented in `server/node/session-lock.cjs` and has dedicated tests.
 
 ## Next inspection
 
-Search the server tree for every `createSessionLock` occurrence, then inspect the exact defining/imported module. The immediate question remains whether a single Firefox session can be classified stale after ordinary background/foreground activity or session-id changes.
+Inspect `server/node/session-lock.cjs` in full (roughly lines 1-120) before any patch. The key questions are exactly how `register`, `peek`, and write/revision updates distinguish `fresh` from `stale`, and whether a single Firefox session can become stale after an ordinary app-switch/foreground return.
