@@ -148,8 +148,27 @@ The backup is therefore byte-identical to the inspected prepatch working file.
 
 The first targeted Python patch checked the exact prepatch SHA before writing, then required two exact copies of the `alertNormalWait(...).then(() => { location.reload() })` text. The count check returned `ABORT alert-reload count=1`.
 
-Because the script exits before `p.write_text(...)`, this attempt did not modify `src/ts/globalApi.svelte.ts`. The mismatch means the two alert-driven reload branches are not byte-for-byte identical in the current file (most likely whitespace/formatting), so the next step is inspection rather than forcing a broader replacement.
+Because the script exits before `p.write_text(...)`, this attempt did not modify `src/ts/globalApi.svelte.ts`.
+
+## Exact patch targets confirmed
+
+A direct numbered-source inspection of lines 370-430 confirms the current control flow precisely:
+
+- BroadcastChannel conflict at lines 379-383 sets `gotChannel = true`, shows `alertNormalWait(language.activeTabChange)`, then reloads after the alert resolves;
+- `risu-session-deactivated` at lines 393-398 does the same on HTTP 423;
+- foreground/focus stale handling at lines 409-425 checks `doingChat`, calls `getWriterLockState()`, and when state is `stale` writes the handoff marker then calls `location.reload()`;
+- focus and `visibilitychange → visible` both trigger this stale check.
+
+The failed exact-string count was therefore only a formatting/indentation mismatch in the patch script, not evidence that one of the three reload branches was absent.
+
+The smallest safe manual-refresh-only patch should preserve the existing conflict alert and server-side 423 write rejection, remove only the three automatic `location.reload()` effects, and suppress repeated foreground stale alerts. Reusing the existing `gotChannel` flag for that one-shot warning is sufficient and avoids adding a second conflict-state variable.
 
 ## Next step
 
-Inspect the exact writer-handoff block around lines 370-430, then patch each automatic reload branch by its concrete current text. Do not guess or use a broad `location.reload()` replacement.
+Apply a SHA-guarded patch that:
+
+1. converts both alert-then-reload branches to alert-only;
+2. makes `checkWriterLockOnReturn()` return immediately once `gotChannel` is set;
+3. on `stale`, sets `gotChannel = true` and shows the existing alert instead of writing a handoff marker and reloading.
+
+Then inspect the resulting diff before running any build or browser test.
