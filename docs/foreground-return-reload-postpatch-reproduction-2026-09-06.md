@@ -186,6 +186,28 @@ It preserved:
 
 This means app backgrounding no longer deliberately starts a full rendered-message DOM/layout scan from the chat-screen hide hooks.
 
+## Static validation after patch
+
+`pnpm check` completed successfully after the patch:
+
+- 0 errors;
+- 4 warnings;
+- all 4 warnings are the same existing accessibility warnings in `DefaultChatScreen.svelte` for clickable `<div>` elements lacking keyboard/ARIA semantics.
+
+No new type or Svelte diagnostics were introduced by the hide-time scroll-scan patch.
+
+## Production build validation after patch
+
+`pnpm build` completed successfully after the patch:
+
+- Vite 8.0.8;
+- 7795 modules transformed;
+- the same existing CSS `::highlight(...)`, browser-externalization, plugin timing, chunk-size, ineffective dynamic-import, and accessibility warnings appeared;
+- no fatal build error occurred;
+- final result: `✓ built in 1m 28s`.
+
+The patched production assets are therefore present in `dist`. The next runtime step is exactly one manual Firefox reload/reopen on the main phone to load the new build, followed by repeated app-switch return testing. Do not add automatic reload as recovery.
+
 ## Next validation
 
-Run `pnpm check`. If it passes, run the production build and then manually load the new build once before reproducing the app-switch scenario. Do not use automatic page reload for validation or recovery.
+After loading the rebuilt app manually once, reproduce switching from Firefox/PocketRisu to another Android app and back. If the refresh/reconstruction still occurs, do not guess another fix; move to non-invasive lifecycle reconstruction instrumentation to distinguish same-document resume from a brand-new Firefox document/content-process reconstruction.
