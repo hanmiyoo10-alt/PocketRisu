@@ -174,8 +174,22 @@ The second SHA-guarded patch succeeded with `PATCH_OK`.
 - `checkWriterLockOnReturn()` is intended to stop once `gotChannel` is set;
 - the stale foreground branch is intended to set `gotChannel = true` and show the existing conflict alert instead of writing the handoff reload marker and calling `location.reload()`.
 
-The source write succeeded, but this is not yet considered validated until `git diff --check` and the exact resulting diff are inspected. No build or runtime claim should be made yet.
+## Static diff validation
+
+`git diff --check` completed with no output, so the working diff has no whitespace errors.
+
+The exact diff confirms the intended writer-handoff behavior:
+
+- BroadcastChannel conflict: `alertNormalWait(...).then(() => location.reload())` became `void alertNormalWait(...)`;
+- HTTP 423 `risu-session-deactivated`: same alert-only conversion;
+- `checkWriterLockOnReturn()` now immediately returns once `gotChannel` is set, preventing repeated foreground conflict checks/alerts after a conflict has already been surfaced;
+- foreground `stale`: the handoff marker write plus `location.reload()` were removed and replaced with `gotChannel = true` plus the existing alert;
+- the unrelated pre-existing local edits (handoff notice removal and hide-time `/api/db/flush` suppression) remain present and were not overwritten.
+
+At this point the three automatic full-page reload effects in this writer-handoff block are removed in the local source while server-side 423 rejection and visible conflict signaling remain intact.
+
+One cleanup item remains before build validation: the nearby comments still describe the old reload-on-return behavior and should be updated to match the new manual-refresh-only semantics. The old `risu-session-handoff-reload` cleanup block is now legacy/dead for this path and should be reviewed rather than silently left misleading.
 
 ## Next step
 
-Run `git diff --check` and inspect the `src/ts/globalApi.svelte.ts` diff before any build or browser test.
+Inspect all `gotChannel` uses and the nearby stale/handoff comments before finalizing. Then make a comment/dead-marker cleanup patch if needed, followed by `svelte-check`/build and a manual browser reload for runtime testing.
