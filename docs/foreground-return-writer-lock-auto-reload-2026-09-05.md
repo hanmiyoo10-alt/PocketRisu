@@ -26,16 +26,18 @@ The project policy is manual-only page refresh. This automatic `location.reload(
 
 Do not replace it with another automatic full-page reload. The repair should preserve writer-lock safety without reloading the page automatically, e.g. by marking the local session stale, surfacing a non-destructive state/notice, and requiring an explicit user action for any full-page refresh if truly necessary.
 
-## Writer-lock implementation location
+## Writer-lock implementation and stale semantics
 
-The follow-up source grep succeeded and located the implementation chain:
+The follow-up inspection confirmed the storage call chain:
 
 - `src/ts/storage/autoStorage.ts` delegates `getWriterLockState()` to the active storage backend;
-- `src/ts/storage/nodeStorage.ts:426` contains the concrete Node/server-backed implementation returning one of `free | active | fresh | stale | unknown`;
-- `src/ts/globalApi.svelte.ts:419` consumes that state during foreground return.
+- `src/ts/storage/nodeStorage.ts:426` performs an authenticated GET to `/api/session/lock-status` and returns the server-provided state;
+- the comment directly above that method defines `stale` as: another device wrote after this page booted, so the current in-memory database copy is outdated and must not be used for a later write without reconciliation.
 
-This is enough to confirm that the next inspection target is the `nodeStorage.ts` implementation around line 426. No patch should be made until the exact conditions producing `stale` are read.
+Important consequence: merely switching Android apps away from Firefox and returning should not, by that definition alone, make the session `stale`. If the page nevertheless reloads on return, the next question is why the server endpoint reported `stale` — for example whether a session identity changed, another writer was observed, or the server-side generation/revision comparison is over-broad.
+
+No client patch should be made until `/api/session/lock-status` server semantics are inspected.
 
 ## Next inspection
 
-Inspect `src/ts/storage/nodeStorage.ts` around `getWriterLockState()` to determine exactly when the state becomes `stale` and whether ordinary app background/foreground transitions can trigger it without a true second-device write.
+Inspect the server implementation of `/api/session/lock-status`, including the conditions that return `stale` and the session/revision identifiers it compares. The goal is to determine whether ordinary background/foreground use can produce a false stale result on a single active main-phone browser session.
