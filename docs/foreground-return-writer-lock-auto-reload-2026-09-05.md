@@ -101,4 +101,24 @@ The only `sessionStorage.removeItem(...)` hit in the relevant runtime code remov
 
 Therefore PocketRisu itself does not intentionally delete `risu-writer-session-id` in the inspected source. If the returning Firefox tab presents a different writer id, the remaining causes are browser/session reconstruction behavior or a genuinely separate tab/session, not an app-side key deletion.
 
-Before changing the reload-on-return behavior, inspect the `risu-session-deactivated`/423 path because it contains another `location.reload()` and may still cause an automatic page reload on the first blocked write even if the foreground stale check is disabled.
+## 423/deactivation auto-reload path confirmed
+
+Inspection of `src/ts/storage/nodeStorage.ts` and `src/ts/globalApi.svelte.ts` confirms a second automatic reload path tied to write rejection:
+
+- `authFetch(...)` attaches `x-session-id` and optional `x-user-active`;
+- when a response returns HTTP 423, `nodeStorage.ts` dispatches `risu-session-deactivated` on `window`;
+- `globalApi.svelte.ts` listens for that event, sets `gotChannel`, shows `alertNormalWait(language.activeTabChange)`, and then calls `location.reload()` after the alert promise resolves.
+
+The same nearby block also contains a BroadcastChannel handoff path that shows the same alert and then reloads.
+
+So there are at least three distinct automatic reload mechanisms in this one writer-handoff area:
+
+1. another BroadcastChannel session is observed;
+2. a server write returns 423 and dispatches `risu-session-deactivated`;
+3. foreground/focus returns `stale` from `/api/session/lock-status` and reloads immediately.
+
+All three conflict with the manual-only refresh policy. However, they are safety mechanisms for stale or competing writers, so they should not simply be deleted without preserving a safe non-reloading blocked/stale state.
+
+## Next inspection
+
+Before patching `globalApi.svelte.ts`, inspect its current local diff and exact file hash because that file is already locally modified. Then design the smallest change that removes only automatic full-page reload behavior while preserving writer-lock rejection and visible user feedback.
