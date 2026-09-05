@@ -119,6 +119,18 @@ So there are at least three distinct automatic reload mechanisms in this one wri
 
 All three conflict with the manual-only refresh policy. However, they are safety mechanisms for stale or competing writers, so they should not simply be deleted without preserving a safe non-reloading blocked/stale state.
 
-## Next inspection
+## Prepatch `globalApi.svelte.ts` inspection
 
-Before patching `globalApi.svelte.ts`, inspect its current local diff and exact file hash because that file is already locally modified. Then design the smallest change that removes only automatic full-page reload behavior while preserving writer-lock rejection and visible user feedback.
+The current server-phone working file was inspected before any change.
+
+- SHA-256: `9c2fb3d453ea2b387f61cf91776e115ce81d0cb6c8e64112f1003614e0df066e`
+- the existing local diff does **not** change the three automatic reload semantics;
+- one hunk only expands the `risu-session-handoff-reload` `sessionStorage.setItem(...)` formatting;
+- one hunk removes the post-handoff `notifyInfo(language.sessionHandoffReload)` toast;
+- one hunk disables hide-time `/api/db/flush` by replacing the body of `flushServerDbKeepalive()` with comments.
+
+This matters because the upcoming manual-refresh-only repair can be made on top of these existing edits without overwriting them. The current automatic `location.reload()` calls are pre-existing behavior relative to the shown local diff, not introduced by those local changes.
+
+## Next step
+
+Create a timestamped backup of the current `src/ts/globalApi.svelte.ts` before patching. Then apply the smallest targeted change that removes only automatic full-page reload behavior while preserving writer-lock rejection and visible conflict/stale signaling.
