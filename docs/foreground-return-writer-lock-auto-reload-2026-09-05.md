@@ -137,4 +137,13 @@ A timestamped backup was created successfully before any manual-refresh-only edi
 
 `src/ts/globalApi.svelte.ts.bak-manual-refresh-20260905-213753`
 
-The source working file was still the inspected prepatch version at the time the backup was taken. The next safe step is to verify the source and backup hashes match before modifying the working file.
+Backup verification PASS:
+
+- working file SHA-256: `9c2fb3d453ea2b387f61cf91776e115ce81d0cb6c8e64112f1003614e0df066e`
+- backup SHA-256: `9c2fb3d453ea2b387f61cf91776e115ce81d0cb6c8e64112f1003614e0df066e`
+
+The backup is therefore byte-identical to the inspected prepatch working file.
+
+## Next step
+
+Apply the smallest targeted edit to remove automatic full-page reloads from the BroadcastChannel, 423 deactivation, and foreground stale branches while preserving writer-lock rejection and visible conflict signaling. Then run a static diff check before any build/runtime test.
