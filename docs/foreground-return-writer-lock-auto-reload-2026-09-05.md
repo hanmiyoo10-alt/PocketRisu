@@ -163,12 +163,19 @@ The failed exact-string count was therefore only a formatting/indentation mismat
 
 The smallest safe manual-refresh-only patch should preserve the existing conflict alert and server-side 423 write rejection, remove only the three automatic `location.reload()` effects, and suppress repeated foreground stale alerts. Reusing the existing `gotChannel` flag for that one-shot warning is sufficient and avoids adding a second conflict-state variable.
 
+## Manual-refresh patch applied locally
+
+The second SHA-guarded patch succeeded with `PATCH_OK`.
+
+- prepatch SHA-256 guard: `9c2fb3d453ea2b387f61cf91776e115ce81d0cb6c8e64112f1003614e0df066e`
+- postpatch SHA-256: `0c1ee78e322895a29b993138942afa8e7922f87c16426be56a9f935a55740690`
+- the regex patch matched exactly two alert-then-reload branches and exactly one stale-marker-plus-reload branch before writing;
+- both BroadcastChannel and 423 deactivation branches are intended to become alert-only;
+- `checkWriterLockOnReturn()` is intended to stop once `gotChannel` is set;
+- the stale foreground branch is intended to set `gotChannel = true` and show the existing conflict alert instead of writing the handoff reload marker and calling `location.reload()`.
+
+The source write succeeded, but this is not yet considered validated until `git diff --check` and the exact resulting diff are inspected. No build or runtime claim should be made yet.
+
 ## Next step
 
-Apply a SHA-guarded patch that:
-
-1. converts both alert-then-reload branches to alert-only;
-2. makes `checkWriterLockOnReturn()` return immediately once `gotChannel` is set;
-3. on `stale`, sets `gotChannel = true` and shows the existing alert instead of writing a handoff marker and reloading.
-
-Then inspect the resulting diff before running any build or browser test.
+Run `git diff --check` and inspect the `src/ts/globalApi.svelte.ts` diff before any build or browser test.
