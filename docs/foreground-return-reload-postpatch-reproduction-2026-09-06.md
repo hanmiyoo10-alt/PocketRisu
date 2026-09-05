@@ -46,8 +46,21 @@ Inspection of `src/ts/bootstrap.ts` around lines 243-248 shows the remaining sta
 
 So this reload is tied to an explicit negative result from the TOS prompt and is not a generic `focus`, `visibilitychange`, `pageshow`, app-return, or network-return handler.
 
-Therefore the known direct `location.reload()` calls no longer provide an obvious foreground-return explanation for the reproduced symptom. The investigation should now check for other navigation primitives (`location.href`, `location.assign`, `location.replace`, `history.go(0)`, etc.) before moving to Firefox/Android content-process/OOM instrumentation.
+Therefore the known direct `location.reload()` calls no longer provide an obvious foreground-return explanation for the reproduced symptom.
 
-## Immediate next check
+## Alternate navigation primitive search
 
-Search non-backup runtime source for other navigation/reload primitives and correlate any hits with `visibilitychange`, `focus`, `pageshow`, `pagehide`, or similar return lifecycle handlers. If no such app-side path exists, pivot to Firefox/Android reconstruction evidence rather than further editing PocketRisu reload logic.
+A search for `location.assign`, `location.replace`, `location.href` writes, `window.location`, `document.location`, `history.go(0)`, `pageshow`, `pagehide`, and `visibilitychange` found no additional direct reload/navigation primitive tied to foreground return.
+
+The notable lifecycle hits are handlers rather than navigations:
+
+- `src/ts/process/request/jobRecovery.ts` has a `visibilitychange` listener for job recovery;
+- `src/ts/globalApi.svelte.ts` has the already-patched writer-lock `visibilitychange` listener and another hide/pagehide save/flush-related listener around lines 513-516;
+- `src/lib/ChatScreens/DefaultChatScreen.svelte` has `visibilitychange` and `pagehide` handlers around lines 376-380;
+- remaining `location.href` references in `characterCards.ts` only parse the current URL, and the `window.location.origin` use in `Chat.svelte` only builds a URL.
+
+So there is currently no source evidence of another explicit foreground-return navigation/reload call.
+
+## Next pivot
+
+The investigation should pivot from reload-call hunting toward hide-time lifecycle work and browser reconstruction evidence. Before blaming Firefox/Android OOM outright, inspect what PocketRisu does on `visibilitychange`/`pagehide`, especially the save/flush path in `globalApi.svelte.ts` and the chat-screen hide handlers, because heavy hide-time work could still contribute to content-process discard or reconstruction even without an explicit reload call.
