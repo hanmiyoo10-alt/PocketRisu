@@ -52,8 +52,10 @@ A source grep found the single server-side instance creation at `server/node/ser
 
 `const sessionLock = createSessionLock();`
 
-The only shown direct method uses in `server.cjs` are the foreground status call through `sessionLock.peek(...)` and boot registration through `sessionLock.register(...)`. The next inspection therefore needs the definition of `createSessionLock()` itself rather than more endpoint code.
+The only shown direct method uses in `server.cjs` are the foreground status call through `sessionLock.peek(...)` and boot registration through `sessionLock.register(...)`.
+
+A direct grep for a local `function createSessionLock`, `const createSessionLock`, or `createSessionLock =` definition inside `server/node/server.cjs` returned no matches. This means the helper is likely imported or defined in another server file rather than inline in `server.cjs`; do not guess its behavior from the call site alone.
 
 ## Next inspection
 
-Locate and inspect the `createSessionLock()` definition and its `peek`, `register`, and write/revision-update logic before changing client behavior. The immediate question is whether a single Firefox session can be classified stale after ordinary background/foreground activity or session-id changes.
+Search the server tree for every `createSessionLock` occurrence, then inspect the exact defining/imported module. The immediate question remains whether a single Firefox session can be classified stale after ordinary background/foreground activity or session-id changes.
