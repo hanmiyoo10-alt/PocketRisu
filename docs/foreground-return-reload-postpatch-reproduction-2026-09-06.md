@@ -83,6 +83,17 @@ Inspection of `src/lib/ChatScreens/DefaultChatScreen.svelte` around lines 363-38
 
 This means an Android app switch can trigger both the global save path and the chat-screen draft/scroll persistence path, potentially twice if `visibilitychange` and `pagehide` both occur. That still does not prove OOM or reconstruction, but these exact hide-time functions are now the next app-side candidates to inspect for synchronous work, large serialization, storage writes, or duplicate persistence.
 
+## Chat hide persistence wrappers inspected
+
+The wrapper bodies themselves are very small:
+
+- `persistChatScrollNow()` only clears a pending scroll-save timer and calls `writeChatScrollSnapshot(chatScrollStorageKey, chatScrollContainer)`;
+- `persistDraftNow()` only calls `flushChatDraft(draftChaId, draftChatId, { m: messageInput, t: messageInputTranslate })`.
+
+So the wrappers do not clone or serialize the whole chat/database themselves. Any meaningful hide-time cost would have to be inside `writeChatScrollSnapshot(...)` or `flushChatDraft(...)`.
+
+The same source also shows scroll restoration can raise `loadPages` based on the saved message index when entering/restoring a chat, but that is a separate render-memory concern and should not be conflated with the immediate hide callback until the persistence helpers are inspected.
+
 ## Next pivot
 
-Inspect the definitions of `persistDraftNow()` and `persistChatScrollNow()` before changing anything. If they are tiny writes, app-side hide work becomes much less plausible as the direct cause and the investigation should move to Firefox/Android content-process reconstruction evidence. If either performs large cloning/serialization/network/database work, patch only that hide-time behavior while preserving normal draft/scroll persistence and manual-only refresh.
+Locate and inspect `writeChatScrollSnapshot(...)` and `flushChatDraft(...)`. If they are small local/network writes, the app-side hide-work hypothesis becomes weak enough to pivot to Firefox/Android page-discard/OOM instrumentation. If either performs large synchronous serialization or expensive work, patch only that helper path while preserving normal draft/scroll persistence and manual-only refresh.
