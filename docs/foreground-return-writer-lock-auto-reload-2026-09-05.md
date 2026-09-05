@@ -144,6 +144,12 @@ Backup verification PASS:
 
 The backup is therefore byte-identical to the inspected prepatch working file.
 
+## First patch attempt safely aborted
+
+The first targeted Python patch checked the exact prepatch SHA before writing, then required two exact copies of the `alertNormalWait(...).then(() => { location.reload() })` text. The count check returned `ABORT alert-reload count=1`.
+
+Because the script exits before `p.write_text(...)`, this attempt did not modify `src/ts/globalApi.svelte.ts`. The mismatch means the two alert-driven reload branches are not byte-for-byte identical in the current file (most likely whitespace/formatting), so the next step is inspection rather than forcing a broader replacement.
+
 ## Next step
 
-Apply the smallest targeted edit to remove automatic full-page reloads from the BroadcastChannel, 423 deactivation, and foreground stale branches while preserving writer-lock rejection and visible conflict signaling. Then run a static diff check before any build/runtime test.
+Inspect the exact writer-handoff block around lines 370-430, then patch each automatic reload branch by its concrete current text. Do not guess or use a broad `location.reload()` replacement.
