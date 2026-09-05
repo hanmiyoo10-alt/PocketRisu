@@ -94,6 +94,15 @@ So the wrappers do not clone or serialize the whole chat/database themselves. An
 
 The same source also shows scroll restoration can raise `loadPages` based on the saved message index when entering/restoring a chat, but that is a separate render-memory concern and should not be conflated with the immediate hide callback until the persistence helpers are inspected.
 
+## Persistence helper locations confirmed
+
+A source grep located the two helper implementations exactly:
+
+- `writeChatScrollSnapshot(...)` is defined in `src/lib/ChatScreens/DefaultChatScreen.svelte` around line 141;
+- `flushChatDraft(...)` is defined/exported in `src/ts/storage/chatDraft.ts` around line 121.
+
+No modification was made from this result alone. The next step is to inspect only those helper bodies to decide whether the hide-time work is small enough to rule out as the likely reconstruction trigger.
+
 ## Next pivot
 
-Locate and inspect `writeChatScrollSnapshot(...)` and `flushChatDraft(...)`. If they are small local/network writes, the app-side hide-work hypothesis becomes weak enough to pivot to Firefox/Android page-discard/OOM instrumentation. If either performs large synchronous serialization or expensive work, patch only that helper path while preserving normal draft/scroll persistence and manual-only refresh.
+Inspect the exact bodies of `writeChatScrollSnapshot(...)` and `flushChatDraft(...)`. If they are small local/network writes, the app-side hide-work hypothesis becomes weak enough to pivot to Firefox/Android page-discard/OOM instrumentation. If either performs large synchronous serialization or expensive work, patch only that helper path while preserving normal draft/scroll persistence and manual-only refresh.
