@@ -79,12 +79,20 @@ This means a simple Android app switch cannot create `stale` inside `session-loc
 
 The existence of the foreground `location.reload()` path is confirmed, but this inspection alone still does not prove that the observed reproduction took that exact branch rather than Firefox reconstructing the page for another reason.
 
-## Client session-id header trace
+## Writer session-id lifecycle
 
-A grep of `src/ts/storage/nodeStorage.ts` found a class-static `sessionId` declaration around line 90 and repeated use of that same value for `x-session-id` headers across the storage/network paths (including lines around 132, 220, 574, 648, 697, and 848).
+Inspection of `src/ts/storage/nodeStorage.ts` around lines 84-99 confirms the intended client identity behavior:
 
-This is useful but not yet enough to conclude whether Firefox app-switch/restore changes the id: a class-static value is stable only for the lifetime of the current JS page instance. The exact initializer around line 90 must be inspected to see whether the id is persisted across page reconstruction/restoration (for example via `sessionStorage`) or regenerated on each document boot.
+- `NodeStorage.sessionId` is initialized once per page life;
+- key name is `risu-writer-session-id`;
+- it first reads the id from `sessionStorage`;
+- only when no stored id exists does it mint a new UUID/fallback id and write it to `sessionStorage`;
+- comments explicitly state that same-tab reload and OS tab restore are supposed to retain the same writer identity, while a genuinely new tab gets a new id.
+
+Multiple network paths in the same file attach this same `NodeStorage.sessionId` as `x-session-id`.
+
+Therefore a normal same-tab page reload should not by design create a new writer identity. If the returning Firefox tab nevertheless appears as a different writer, the next check is whether any PocketRisu code clears/removes `risu-writer-session-id` or clears sessionStorage, or whether Firefox reconstruction itself loses that storage entry in the observed case.
 
 ## Next inspection
 
-Inspect `src/ts/storage/nodeStorage.ts` around the `private static sessionId` initializer before changing any lock logic. The immediate question is whether a reconstructed/restored Firefox page keeps the same session id or generates a new one.
+Search for all writes/removals affecting `risu-writer-session-id` and any broad `sessionStorage.clear()` calls. Do not patch the lock or remove stale safety until identity loss is either confirmed or ruled out.
