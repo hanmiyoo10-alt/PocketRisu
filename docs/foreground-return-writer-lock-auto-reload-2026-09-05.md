@@ -56,8 +56,29 @@ A server-tree grep located the exact implementation:
 - `server/node/session-lock.cjs:110` exports it;
 - `server/node/session-lock.test.ts` contains direct tests for the helper.
 
-This resolves the previous ambiguity: the stale state machine is not inline in `server.cjs`; it is implemented in `server/node/session-lock.cjs` and has dedicated tests.
+## Session-lock state machine confirmed
+
+Full inspection of `server/node/session-lock.cjs` shows that ordinary hide/foreground activity by itself does not change a session to `stale`.
+
+The state machine is:
+
+- `register(id)` records a boot timestamp. It adopts the lock only when there is no current active session. Re-registering the same active id keeps the lock.
+- `checkWrite(id, userActive)` accepts writes from the active session and advances `active.lastWriteAt`.
+- a different session is `fresh` only when its recorded boot timestamp is later than the active session's last accepted write;
+- a fresh + user-active writer may take over the lock;
+- a fresh automatic writer is accepted passively without taking the lock;
+- `peek(id)` returns `active` for the current active id, `free` when no lock exists, `fresh` when this session booted after the active writer's last write, and otherwise `stale`.
+
+Therefore `stale` specifically requires that the returning client's session id is not the active id and that its recorded boot is absent or not newer than the active writer's `lastWriteAt`.
+
+This means a simple Android app switch cannot create `stale` inside `session-lock.cjs` on its own. The remaining plausible causes are now narrower:
+
+1. the Firefox client presents a different or missing `x-session-id` after return/restoration;
+2. another session actually took the writer lock and wrote after this page's recorded boot;
+3. client-side session/user-activity bookkeeping causes an unexpected second session to take over.
+
+The existence of the foreground `location.reload()` path is confirmed, but this inspection alone still does not prove that the observed reproduction took that exact branch rather than Firefox reconstructing the page for another reason.
 
 ## Next inspection
 
-Inspect `server/node/session-lock.cjs` in full (roughly lines 1-120) before any patch. The key questions are exactly how `register`, `peek`, and write/revision updates distinguish `fresh` from `stale`, and whether a single Firefox session can become stale after an ordinary app-switch/foreground return.
+Inspect the client session-id lifecycle and `x-session-id` header construction in `src/ts/storage/nodeStorage.ts`, then inspect the user-active write marker if needed. Do not patch the server state machine or remove safety checks until session identity behavior is confirmed.
