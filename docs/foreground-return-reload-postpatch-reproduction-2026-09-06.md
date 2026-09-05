@@ -128,6 +128,17 @@ Before any optimization, the working file was checked:
 
 This is important because a new fix must preserve the rest of that local scroll/draft functionality rather than reverting the whole hunk. Do not overwrite the file blindly.
 
-## Next pivot
+## Local diff identifies the exact regression candidate
 
-Inspect the full local diff around the scroll-persistence additions before editing. Then make the smallest possible change that removes or bounds hide-time full-DOM layout scanning while preserving normal scroll restoration and draft persistence. Follow backup -> patch -> verify, and keep manual-refresh-only behavior.
+The expanded local diff shows that the original hide/unload hook only persisted the draft:
+
+- `visibilitychange -> hidden` called `persistDraftNow()`;
+- `pagehide` called `persistDraftNow()`.
+
+The local scroll-restoration modification changed both handlers to additionally call `persistChatScrollNow()`. That helper immediately invokes the full DOM/layout snapshot scan described above.
+
+So the expensive hide-time scroll scan is not merely adjacent to existing upstream behavior; it was introduced by the same local modification that added scroll restoration. This substantially strengthens it as a regression candidate for app-switch pressure. The rest of the scroll-restoration feature can be preserved because ordinary scroll activity already uses `scheduleChatScrollSave(...)` with a 120 ms debounce.
+
+## Next patch direction
+
+Before editing, confirm every `persistChatScrollNow` reference. If it is only the helper definition plus the two hide/pagehide calls, make a narrow backup-backed patch that removes the hide/pagehide immediate scroll scan while leaving draft persistence and ordinary debounced scroll snapshot saving intact. Then run `git diff --check` and `pnpm check` before a production build/runtime test. Do not add any automatic page reload.
