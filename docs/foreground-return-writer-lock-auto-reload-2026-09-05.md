@@ -198,8 +198,22 @@ A follow-up grep of `gotChannel`, `risu-session-handoff-reload`, and reload-on-r
 - legacy comments around lines 387/398 still describe the old reload-on-return design;
 - the old `risu-session-handoff-reload` cleanup block around lines 427-431 remains even though the foreground stale path no longer writes that marker.
 
-Do not remove the later `gotChannel` use or dead-marker block blindly until the save path around line 808 is inspected.
+## Save-blocker safety preserved
 
-## Next step
+Inspection of `persistTrackedChanges(...)` around lines 801-812 confirms that `gotChannel` is the save blocker and must remain:
 
-Inspect the `gotChannel` use around line 808. If it confirms that `gotChannel` blocks further saves after a conflict/stale warning, keep that safety behavior, then clean only the misleading comments and legacy handoff marker cleanup before running `svelte-check` and a build.
+- when `gotChannel` is true, the function sleeps briefly and returns `noop` before posting to the BroadcastChannel or attempting persistence;
+- therefore once a BroadcastChannel conflict, HTTP 423 deactivation, or foreground `stale` state marks this page conflicted, that page no longer writes its stale in-memory DB back to storage;
+- removing the automatic reload does not remove the actual write-safety guard.
+
+This gives the desired manual-refresh behavior: conflict/stale is surfaced visibly, the unsafe writer is blocked, and the page is not automatically refreshed.
+
+## Svelte static check
+
+`pnpm check` completed successfully after the manual-refresh patch:
+
+- `svelte-check found 0 errors and 4 warnings in 1 file`;
+- all four warnings are accessibility warnings in `src/lib/ChatScreens/DefaultChatScreen.svelte` around lines 1288 and 1302 (`div` click handlers without keyboard/ARIA handling);
+- there were no errors in `globalApi.svelte.ts` and no new compile/type diagnostic attributable to the manual-refresh patch.
+
+The remaining cleanup before build is non-functional: update the stale reload-era comments and remove the legacy `risu-session-handoff-reload` cleanup block, then re-run diff/static validation and build.
