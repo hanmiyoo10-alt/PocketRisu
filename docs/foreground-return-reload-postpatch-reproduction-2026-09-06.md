@@ -112,6 +112,22 @@ The helper bodies show two different cost profiles:
 
 So draft persistence looks lightweight, while scroll persistence can force synchronous DOM/layout work exactly during `visibilitychange -> hidden` / `pagehide`. Its cost grows with the number of currently rendered/loaded message elements, so it is a plausible pressure amplifier when `loadPages` has grown large. This is still not proof that it causes Firefox reconstruction.
 
+## Scroll snapshot full-scan confirmed
+
+`getLoadedMessages(container)` calls `querySelectorAll('[data-chat-index]')`, converts all matching nodes to an array, parses every index, and sorts the entire list. `writeChatScrollSnapshot(...)` then checks the loaded nodes with `getBoundingClientRect()` until it finds the visible message, reads that element's rect once more, and writes only a tiny `{ messageIndex, offsetTop }` JSON object to `localStorage`.
+
+Therefore the storage payload is tiny; the potentially expensive part is the synchronous DOM/layout scan, not serialization or storage size.
+
+## Existing-local-diff status
+
+Before any optimization, the working file was checked:
+
+- current SHA-256: `ff65d5fb0d3ba97110d1543fd2a2e5950181a8833490af24af4f297c7eb86aab`;
+- the `git diff` shows `writeChatScrollSnapshot`, `persistChatScrollNow`, scroll restoration/loadPages logic, and the `visibilitychange`/`pagehide` persistence hooks are already part of the existing local diff relative to repository HEAD;
+- they are not clean upstream code in the current checkout.
+
+This is important because a new fix must preserve the rest of that local scroll/draft functionality rather than reverting the whole hunk. Do not overwrite the file blindly.
+
 ## Next pivot
 
-Inspect `getLoadedMessages(...)` and the remainder of `writeChatScrollSnapshot(...)` before modifying anything. If it scans all rendered message nodes and writes only a tiny snapshot, the likely optimization is to avoid or bound hide-time layout scanning rather than touching DB persistence. Keep manual-refresh-only behavior.
+Inspect the full local diff around the scroll-persistence additions before editing. Then make the smallest possible change that removes or bounds hide-time full-DOM layout scanning while preserving normal scroll restoration and draft persistence. Follow backup -> patch -> verify, and keep manual-refresh-only behavior.
