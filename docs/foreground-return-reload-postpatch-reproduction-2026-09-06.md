@@ -159,6 +159,33 @@ A timestamped backup was created before any edit:
 
 The hashes match exactly, so rollback is available and the modification step can proceed safely.
 
-## Next patch direction
+## Hide-time scroll-scan patch applied
 
-Make the smallest patch that removes only `persistChatScrollNow()` and its two hide/pagehide calls. Preserve `persistDraftNow()`, `scheduleChatScrollSave(...)`, `writeChatScrollSnapshot(...)`, scroll restoration, and manual-refresh-only behavior. Verify the exact reference removal plus `git diff --check` before running `pnpm check` and then a production build/runtime test.
+The narrow patch was applied successfully to `src/lib/ChatScreens/DefaultChatScreen.svelte`.
+
+Patch result:
+
+- script reported `PATCH_OK`;
+- post-patch SHA-256 is `f69eb15803e7902751d836ce07ae70d3b03dcef7a108831e54b80fbd91411508`;
+- `persistChatScrollNow` now has zero references in the file;
+- `git diff --check -- src/lib/ChatScreens/DefaultChatScreen.svelte` produced no output, so whitespace/error sanity passed.
+
+The patch removed only:
+
+- the `persistChatScrollNow()` helper;
+- its `visibilitychange -> hidden` call;
+- its `pagehide` call.
+
+It preserved:
+
+- `persistDraftNow()` on hide/pagehide;
+- `scheduleChatScrollSave(...)` and its normal 120 ms debounced scroll snapshot path;
+- `writeChatScrollSnapshot(...)` itself for ordinary scroll activity;
+- scroll restoration logic;
+- manual-refresh-only policy.
+
+This means app backgrounding no longer deliberately starts a full rendered-message DOM/layout scan from the chat-screen hide hooks.
+
+## Next validation
+
+Run `pnpm check`. If it passes, run the production build and then manually load the new build once before reproducing the app-switch scenario. Do not use automatic page reload for validation or recovery.
