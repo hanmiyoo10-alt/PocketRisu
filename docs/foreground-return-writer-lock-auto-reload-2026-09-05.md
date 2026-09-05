@@ -34,10 +34,18 @@ The follow-up inspection confirmed the storage call chain:
 - `src/ts/storage/nodeStorage.ts:426` performs an authenticated GET to `/api/session/lock-status` and returns the server-provided state;
 - the comment directly above that method defines `stale` as: another device wrote after this page booted, so the current in-memory database copy is outdated and must not be used for a later write without reconciliation.
 
-Important consequence: merely switching Android apps away from Firefox and returning should not, by that definition alone, make the session `stale`. If the page nevertheless reloads on return, the next question is why the server endpoint reported `stale` — for example whether a session identity changed, another writer was observed, or the server-side generation/revision comparison is over-broad.
+Important consequence: merely switching Android apps away from Firefox and returning should not, by that definition alone, make the session `stale`.
 
-No client patch should be made until `/api/session/lock-status` server semantics are inspected.
+## Server endpoint trace
+
+`server/node/server.cjs` around lines 3735-3742 confirms that `/api/session/lock-status` itself contains no additional stale logic. After auth, it reads `x-session-id` and returns:
+
+`sessionLock.peek(typeof id === 'string' ? id : '')`
+
+The nearby `/api/session` boot endpoint registers the client session via `sessionLock.register(clientSessionId)`.
+
+Therefore the actual state machine that can falsely produce `stale` is inside the `sessionLock` implementation, especially `peek(...)` and any write/revision bookkeeping it consults. The HTTP endpoint is only a thin wrapper.
 
 ## Next inspection
 
-Inspect the server implementation of `/api/session/lock-status`, including the conditions that return `stale` and the session/revision identifiers it compares. The goal is to determine whether ordinary background/foreground use can produce a false stale result on a single active main-phone browser session.
+Locate and inspect the `sessionLock` implementation (`peek`, `register`, writer/revision updates) before changing client behavior. The immediate question is whether a single Firefox session can be classified stale after ordinary background/foreground activity or session-id changes.
