@@ -91,8 +91,14 @@ Inspection of `src/ts/storage/nodeStorage.ts` around lines 84-99 confirms the in
 
 Multiple network paths in the same file attach this same `NodeStorage.sessionId` as `x-session-id`.
 
-Therefore a normal same-tab page reload should not by design create a new writer identity. If the returning Firefox tab nevertheless appears as a different writer, the next check is whether any PocketRisu code clears/removes `risu-writer-session-id` or clears sessionStorage, or whether Firefox reconstruction itself loses that storage entry in the observed case.
+Therefore a normal same-tab page reload should not by design create a new writer identity.
 
-## Next inspection
+## App-side session key clearing ruled out
 
-Search for all writes/removals affecting `risu-writer-session-id` and any broad `sessionStorage.clear()` calls. Do not patch the lock or remove stale safety until identity loss is either confirmed or ruled out.
+A repository grep for `risu-writer-session-id`, `sessionStorage.clear()`, and `removeItem(...)` found no code that clears or removes the writer-session key.
+
+The only `sessionStorage.removeItem(...)` hit in the relevant runtime code removes the unrelated `risu-session-handoff-reload` marker after a handoff reload. No `sessionStorage.clear()` hit was found.
+
+Therefore PocketRisu itself does not intentionally delete `risu-writer-session-id` in the inspected source. If the returning Firefox tab presents a different writer id, the remaining causes are browser/session reconstruction behavior or a genuinely separate tab/session, not an app-side key deletion.
+
+Before changing the reload-on-return behavior, inspect the `risu-session-deactivated`/423 path because it contains another `location.reload()` and may still cause an automatic page reload on the first blocked write even if the foreground stale check is disabled.
