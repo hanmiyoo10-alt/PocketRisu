@@ -109,6 +109,19 @@ The preview picker is different: it already keeps one `previewAudio` reference a
 
 This does not prove Android/Firefox audio focus or route changes are the sole cause of the UI-stuck symptom. It does establish a concrete lifecycle weakness in the exact automatic completion-sound path. The first repair should therefore be a **single bounded completion-sound channel with explicit stop/release on replacement/end/error**, while preserving fire-and-forget behavior and never reloading the page. After that repair, call/Discord/headset route-change A/B testing can determine whether additional interruption handling is needed.
 
+## 2026-09-05 foreground-return reproduction
+
+The user reported a fresh real-world reproduction: while using PocketRisu in Firefox, they switched to another Android app and then returned to Firefox, at which point the PocketRisu page had refreshed/reconstructed without an intentional manual refresh.
+
+This is important because the trigger is specifically **background app switch → foreground return**. At this checkpoint the exact cause is not yet proven. Two classes remain separate and must be distinguished before patching:
+
+- PocketRisu executing a page reload from a background/foreground-related code path, such as a `visibilitychange` / save/session-handoff path;
+- Firefox/Android discarding and reconstructing the content process under memory pressure while PocketRisu is backgrounded.
+
+The observation is consistent with the project's existing OOM/content-process-reconstruction concern, but it does not by itself prove OOM. It also means the remaining `location.reload()` session-handoff path in `src/ts/globalApi.svelte.ts` deserves direct inspection against foreground/background callers rather than being treated as unrelated.
+
+Do not add any automatic page reload as recovery. The next inspection should identify every non-TOS `location.reload()` call and every `visibilitychange`/hidden-state path that can reach save/session-handoff logic, then compare that with the Firefox reconstruction hypothesis.
+
 ## Working taxonomy for the next investigation
 
 Do not use "refresh" as one diagnosis. Separate at least:
