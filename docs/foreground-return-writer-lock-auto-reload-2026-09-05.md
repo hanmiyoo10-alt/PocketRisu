@@ -79,6 +79,12 @@ This means a simple Android app switch cannot create `stale` inside `session-loc
 
 The existence of the foreground `location.reload()` path is confirmed, but this inspection alone still does not prove that the observed reproduction took that exact branch rather than Firefox reconstructing the page for another reason.
 
+## Client session-id header trace
+
+A grep of `src/ts/storage/nodeStorage.ts` found a class-static `sessionId` declaration around line 90 and repeated use of that same value for `x-session-id` headers across the storage/network paths (including lines around 132, 220, 574, 648, 697, and 848).
+
+This is useful but not yet enough to conclude whether Firefox app-switch/restore changes the id: a class-static value is stable only for the lifetime of the current JS page instance. The exact initializer around line 90 must be inspected to see whether the id is persisted across page reconstruction/restoration (for example via `sessionStorage`) or regenerated on each document boot.
+
 ## Next inspection
 
-Inspect the client session-id lifecycle and `x-session-id` header construction in `src/ts/storage/nodeStorage.ts`, then inspect the user-active write marker if needed. Do not patch the server state machine or remove safety checks until session identity behavior is confirmed.
+Inspect `src/ts/storage/nodeStorage.ts` around the `private static sessionId` initializer before changing any lock logic. The immediate question is whether a reconstructed/restored Firefox page keeps the same session id or generates a new one.
