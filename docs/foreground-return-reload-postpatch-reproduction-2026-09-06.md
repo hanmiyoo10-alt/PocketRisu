@@ -149,6 +149,16 @@ A direct grep of `persistChatScrollNow` in the working file returned exactly thr
 
 There are no other callers. This means the immediate hide-time full-DOM/layout scan can be removed surgically by deleting the two hide/pagehide calls and then removing the now-unused helper, while leaving draft persistence and normal debounced scroll snapshots intact.
 
+## Backup verification before patch
+
+A timestamped backup was created before any edit:
+
+- backup: `src/lib/ChatScreens/DefaultChatScreen.svelte.bak-hide-scroll-scan-20260906-020004`;
+- working-file SHA-256 before patch: `ff65d5fb0d3ba97110d1543fd2a2e5950181a8833490af24af4f297c7eb86aab`;
+- backup SHA-256: `ff65d5fb0d3ba97110d1543fd2a2e5950181a8833490af24af4f297c7eb86aab`.
+
+The hashes match exactly, so rollback is available and the modification step can proceed safely.
+
 ## Next patch direction
 
-Proceed with backup first. Then make the smallest patch that removes only `persistChatScrollNow()` and its two hide/pagehide calls. Preserve `persistDraftNow()`, `scheduleChatScrollSave(...)`, `writeChatScrollSnapshot(...)`, scroll restoration, and manual-refresh-only behavior. Verify with `git diff --check` and `pnpm check` before a production build/runtime test.
+Make the smallest patch that removes only `persistChatScrollNow()` and its two hide/pagehide calls. Preserve `persistDraftNow()`, `scheduleChatScrollSave(...)`, `writeChatScrollSnapshot(...)`, scroll restoration, and manual-refresh-only behavior. Verify the exact reference removal plus `git diff --check` before running `pnpm check` and then a production build/runtime test.
