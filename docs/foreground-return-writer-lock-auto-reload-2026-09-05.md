@@ -26,6 +26,16 @@ The project policy is manual-only page refresh. This automatic `location.reload(
 
 Do not replace it with another automatic full-page reload. The repair should preserve writer-lock safety without reloading the page automatically, e.g. by marking the local session stale, surfacing a non-destructive state/notice, and requiring an explicit user action for any full-page refresh if truly necessary.
 
+## Writer-lock implementation location
+
+The follow-up source grep succeeded and located the implementation chain:
+
+- `src/ts/storage/autoStorage.ts` delegates `getWriterLockState()` to the active storage backend;
+- `src/ts/storage/nodeStorage.ts:426` contains the concrete Node/server-backed implementation returning one of `free | active | fresh | stale | unknown`;
+- `src/ts/globalApi.svelte.ts:419` consumes that state during foreground return.
+
+This is enough to confirm that the next inspection target is the `nodeStorage.ts` implementation around line 426. No patch should be made until the exact conditions producing `stale` are read.
+
 ## Next inspection
 
-Before patching, inspect `forageStorage.getWriterLockState()` and the writer-lock/session handoff semantics to determine what `stale` means and what state must be refreshed safely without a page reload.
+Inspect `src/ts/storage/nodeStorage.ts` around `getWriterLockState()` to determine exactly when the state becomes `stale` and whether ordinary app background/foreground transitions can trigger it without a true second-device write.
