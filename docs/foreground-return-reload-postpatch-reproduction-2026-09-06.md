@@ -61,6 +61,23 @@ The notable lifecycle hits are handlers rather than navigations:
 
 So there is currently no source evidence of another explicit foreground-return navigation/reload call.
 
+## Hide-time forced save path confirmed
+
+Inspection of `src/ts/globalApi.svelte.ts` around lines 501-516 shows that backgrounding the page deliberately forces the save path:
+
+- `flushImmediate()` clears any pending save timeout;
+- it unconditionally sets `changed = true`;
+- it immediately calls `triggerSave({ skipBroadcast: true })` without awaiting it;
+- it then calls `flushServerDbKeepalive()`;
+- `visibilitychange -> hidden` calls `flushImmediate()`;
+- `pagehide` also calls the same function.
+
+The current local version of `flushServerDbKeepalive()` has already been reduced to a no-op, so the remaining hide-time work of interest is the forced `triggerSave()` call itself.
+
+Because `changed` is set to true even if there was no actual user change, every app switch/background transition can force the persistence path. That is a concrete source-level candidate for CPU/memory/serialization pressure at exactly the moment Firefox is being backgrounded, though it is not yet proof that this causes the browser reconstruction.
+
+Do not patch this blindly yet. Inspect `triggerSave()` and the persistence path first to determine whether it performs a full DB serialization/write or can otherwise allocate heavily on each hide.
+
 ## Next pivot
 
-The investigation should pivot from reload-call hunting toward hide-time lifecycle work and browser reconstruction evidence. Before blaming Firefox/Android OOM outright, inspect what PocketRisu does on `visibilitychange`/`pagehide`, especially the save/flush path in `globalApi.svelte.ts` and the chat-screen hide handlers, because heavy hide-time work could still contribute to content-process discard or reconstruction even without an explicit reload call.
+Inspect the implementation and immediate callees of `triggerSave()` in `globalApi.svelte.ts`, especially whether the hide-forced path serializes/writes the full DB or large tracked structures. If it is heavy, patching the hide behavior should preserve ordinary debounced saving and must not introduce any automatic reload.
