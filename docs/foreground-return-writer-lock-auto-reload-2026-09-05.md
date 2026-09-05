@@ -46,6 +46,14 @@ The nearby `/api/session` boot endpoint registers the client session via `sessio
 
 Therefore the actual state machine that can falsely produce `stale` is inside the `sessionLock` implementation, especially `peek(...)` and any write/revision bookkeeping it consults. The HTTP endpoint is only a thin wrapper.
 
+## Session-lock instance location
+
+A source grep found the single server-side instance creation at `server/node/server.cjs:2174`:
+
+`const sessionLock = createSessionLock();`
+
+The only shown direct method uses in `server.cjs` are the foreground status call through `sessionLock.peek(...)` and boot registration through `sessionLock.register(...)`. The next inspection therefore needs the definition of `createSessionLock()` itself rather than more endpoint code.
+
 ## Next inspection
 
-Locate and inspect the `sessionLock` implementation (`peek`, `register`, writer/revision updates) before changing client behavior. The immediate question is whether a single Firefox session can be classified stale after ordinary background/foreground activity or session-id changes.
+Locate and inspect the `createSessionLock()` definition and its `peek`, `register`, and write/revision-update logic before changing client behavior. The immediate question is whether a single Firefox session can be classified stale after ordinary background/foreground activity or session-id changes.
