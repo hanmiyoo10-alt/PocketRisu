@@ -12,7 +12,7 @@ The patched `globalApi.svelte.ts` no longer auto-reloads for BroadcastChannel co
 
 Because the symptom still reproduces after a successful production build and manual browser reload, the next investigation must distinguish between:
 
-- another remaining PocketRisu reload path that is actually reachable during foreground return;
+- another remaining PocketRisu reload/navigation path that is actually reachable during foreground return;
 - Firefox/Android content-process discard / OOM reconstruction;
 - stale browser assets unexpectedly serving an older bundle.
 
@@ -34,8 +34,20 @@ The source grep for remaining non-backup `location.reload()` calls found only:
 - `src/lib/Setting/ServerBackupList.svelte` at line 64;
 - `src/lib/_dev/DevPanel.svelte` at line 54.
 
-This means the removed `globalApi.svelte.ts` writer-lock reloads are no longer in the remaining source list. Most remaining calls appear tied to explicit backup/update/dev UI actions, while `bootstrap.ts:246` is the only remaining core startup-path reload and is the next source location to inspect before moving to browser/OOM instrumentation.
+This means the removed `globalApi.svelte.ts` writer-lock reloads are no longer in the remaining source list. Most remaining calls are tied to explicit backup/update/dev UI actions.
+
+## `bootstrap.ts:246` ruled out for ordinary foreground return
+
+Inspection of `src/ts/bootstrap.ts` around lines 243-248 shows the remaining startup-path `location.reload()` is only inside the Terms-of-Service flow:
+
+- it runs only when `import.meta.env.VITE_RISU_TOS === 'TRUE'`;
+- `alertTOS()` resolves to `a`;
+- `location.reload()` executes only when `a === false`.
+
+So this reload is tied to an explicit negative result from the TOS prompt and is not a generic `focus`, `visibilitychange`, `pageshow`, app-return, or network-return handler.
+
+Therefore the known direct `location.reload()` calls no longer provide an obvious foreground-return explanation for the reproduced symptom. The investigation should now check for other navigation primitives (`location.href`, `location.assign`, `location.replace`, `history.go(0)`, etc.) before moving to Firefox/Android content-process/OOM instrumentation.
 
 ## Immediate next check
 
-Inspect the control flow around `src/ts/bootstrap.ts:246`. If it is user-action-only or unrelated to foreground return, the investigation should pivot to distinguishing Firefox/Android page reconstruction from any remaining non-`location.reload()` navigation/reload mechanism.
+Search non-backup runtime source for other navigation/reload primitives and correlate any hits with `visibilitychange`, `focus`, `pageshow`, `pagehide`, or similar return lifecycle handlers. If no such app-side path exists, pivot to Firefox/Android reconstruction evidence rather than further editing PocketRisu reload logic.
