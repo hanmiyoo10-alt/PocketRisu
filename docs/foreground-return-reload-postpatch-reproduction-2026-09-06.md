@@ -208,6 +208,10 @@ No new type or Svelte diagnostics were introduced by the hide-time scroll-scan p
 
 The patched production assets are therefore present in `dist`. The next runtime step is exactly one manual Firefox reload/reopen on the main phone to load the new build, followed by repeated app-switch return testing. Do not add automatic reload as recovery.
 
-## Next validation
+## Post-patch long-background reproduction
 
-After loading the rebuilt app manually once, reproduce switching from Firefox/PocketRisu to another Android app and back. If the refresh/reconstruction still occurs, do not guess another fix; move to non-invasive lifecycle reconstruction instrumentation to distinguish same-document resume from a brand-new Firefox document/content-process reconstruction.
+After the rebuilt hide-time scroll-scan patch was loaded manually in Firefox, the user left PocketRisu in the background for a longer interval in another Android app and then returned. The same visible refresh/reconstruction happened again.
+
+This runtime result materially weakens the hide-time scroll DOM/layout scan as the root cause of the foreground-return reconstruction. The optimization is still reasonable because it removes unnecessary synchronous work during backgrounding, but it did not eliminate the observed symptom.
+
+At this point, further blind patching of hide handlers is not justified. The next step is non-invasive lifecycle instrumentation that can distinguish a resumed existing JavaScript document from a brand-new document/content-process reconstruction. The trace should capture boot identity/time, `visibilitychange`, `pagehide`/`pageshow` and `event.persisted`, navigation entry type, and continuity of the existing `risu-writer-session-id`, without adding any automatic reload.
