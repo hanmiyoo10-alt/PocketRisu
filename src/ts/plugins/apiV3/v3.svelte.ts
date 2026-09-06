@@ -3,11 +3,12 @@ import { SandboxHost } from "./factory";
 import { getDatabase, normalizeChat } from "src/ts/storage/database.svelte";
 import { SafeLocalPluginStorage, tagWhitelist } from "../pluginSafeClass";
 import { recordOwner, removeOwner, clearOwners } from "../pluginStorageMeta";
+import * as pluginStorageStore from "../pluginStorageStore";
 import DOMPurify from 'dompurify';
 import { additionalChatMenu, additionalFloatingActionButtons, additionalHamburgerMenu, additionalSettingsMenu, bodyIntercepterStore, chatPanelStore, DBState, selectedCharID, type MenuDef } from "src/ts/stores.svelte";
 import { v4 } from "uuid";
 import { sleep } from "src/ts/util";
-import { alertConfirm, alertError, alertNormal } from "src/ts/alert";
+import { alertConfirm, alertError, alertNormal, alertNormalWait } from "src/ts/alert";
 import { language } from "src/lang";
 import { checkCharOrder, forageStorage, getFetchLogs } from "src/ts/globalApi.svelte";
 import { changeColorScheme, updateColorScheme, updateTextThemeAndCSS, type ColorScheme } from "src/ts/gui/colorscheme";
@@ -25,6 +26,8 @@ import type { ModelModeExtended } from "src/ts/process/request/shared";
 import { requestChatDataMain } from "src/ts/process/request/request";
 import type { OpenAIChat } from "src/ts/process/index.svelte";
 import { getModuleLorebooks } from "src/ts/process/modules";
+import { hydratePluginCharacterSnapshot, hydratePluginDatabaseSnapshot, restorePluginCharacterManifest } from "../pluginCharacterSnapshot";
+import { PLUGIN_CUSTOM_STORAGE_KEY, wantsFullPluginStorage } from "../pluginDbProxy";
 import {
     registerTTSPreprocessor,
     unregisterTTSPreprocessor,
@@ -57,14 +60,14 @@ import {
 */
 
 const pluginChannel = new Map<string, Function>();
-const documentEventListeners: Array<{type: string, listener: EventListenerOrEventListenerObject, options: any, pluginName: string}> = [];
+const documentEventListeners: Array<{pluginName: string, type: string, listener: EventListenerOrEventListenerObject, options: any}> = [];
 
 class SafeElement {
     #element: HTMLElement;
-    protected pluginName: string;
+    protected readonly pluginName: string;
     __classType = 'REMOTE_REQUIRED' as const;
 
-    constructor(element: HTMLElement, pluginName: string) {
+    constructor(element: HTMLElement, pluginName: string = '') {
         if(element.getAttribute('freezed')){
             throw new Error("This element cannot be accessed by SafeELement")
         }
@@ -319,7 +322,7 @@ class SafeElement {
                 listener(trimEvent(event))
             }
             this.#eventIdMap.set(id, modifiedListener)
-            documentEventListeners.push({type, listener: modifiedListener as EventListenerOrEventListenerObject, options: realOptions, pluginName: this.pluginName})
+            documentEventListeners.push({pluginName: this.pluginName, type, listener: modifiedListener as EventListenerOrEventListenerObject, options: realOptions})
             document.addEventListener(type, modifiedListener, realOptions)
             return id;
         }
@@ -334,7 +337,7 @@ class SafeElement {
                 }, delay);
             }
             this.#eventIdMap.set(id, modifiedListener)
-            documentEventListeners.push({type, listener: modifiedListener as EventListenerOrEventListenerObject, options: realOptions, pluginName: this.pluginName})
+            documentEventListeners.push({pluginName: this.pluginName, type, listener: modifiedListener as EventListenerOrEventListenerObject, options: realOptions})
             document.addEventListener(type, modifiedListener, realOptions);
             return id;
         }
@@ -361,7 +364,7 @@ class SafeElement {
 
 class SafeDocument extends SafeElement {
     __classType = 'REMOTE_REQUIRED' as const;
-    constructor(document: Document, pluginName: string) {
+    constructor(document: Document, pluginName: string = '') {
         super(document.documentElement, pluginName);
     }
     createElement(tagName: string): SafeElement {
@@ -439,10 +442,8 @@ type SafeMutationCallback = (mutations: SafeClassArray<SafeMutationRecord>) => v
 
 class SafeMutationObserver {
     #observer: MutationObserver;
-    #pluginName: string;
     __classType = 'REMOTE_REQUIRED' as const;
-    constructor(callback: SafeMutationCallback, pluginName: string) {
-        this.#pluginName = pluginName;
+    constructor(callback: SafeMutationCallback, pluginName: string = '') {
         this.#observer = new MutationObserver((mutations) => {
             const safeMutations: SafeMutationRecordObject[] = mutations.map(mutation => {
 
@@ -450,7 +451,7 @@ class SafeMutationObserver {
                     const elements: SafeElement[] = [];
                     nodeList.forEach(node => {
                         if(node instanceof HTMLElement) {
-                            elements.push(new SafeElement(node, this.#pluginName));
+                            elements.push(new SafeElement(node, pluginName));
                         }
                     })
                     return elements;
@@ -458,7 +459,7 @@ class SafeMutationObserver {
 
                 return {
                     type: mutation.type,
-                    target: new SafeElement(mutation.target as HTMLElement, this.#pluginName),
+                    target: new SafeElement(mutation.target as HTMLElement, pluginName),
                     addedNodes: elementMapHelper(mutation.addedNodes),
                     removedNodes: elementMapHelper(mutation.removedNodes)
                     
@@ -500,16 +501,6 @@ const addPluginUnloadCallback = (pluginName: string, callback: Function) => {
         pluginUnloadCallbacks.set(pluginName, []);
     }
     pluginUnloadCallbacks.get(pluginName)?.push(callback);
-}
-
-const removePluginDocumentEventListeners = (pluginName: string) => {
-    for(let i = documentEventListeners.length - 1; i >= 0; i--){
-        const entry = documentEventListeners[i];
-        if(entry.pluginName === pluginName){
-            document.removeEventListener(entry.type, entry.listener, entry.options);
-            documentEventListeners.splice(i, 1);
-        }
-    }
 }
 
 const makeMenuUnloadCallback = (menuId:string, menuStore: MenuDef[]) =>{
@@ -560,9 +551,12 @@ const unloadV3Plugin = async (pluginName: string) => {
             sleep(1000) //timeout after 1 second
         ])
     }
-
-    removePluginDocumentEventListeners(pluginName)
-
+    for(let i = documentEventListeners.length - 1; i >= 0; i--){
+        const entry = documentEventListeners[i];
+        if(entry.pluginName !== pluginName) continue;
+        document.removeEventListener(entry.type, entry.listener, entry.options);
+        documentEventListeners.splice(i, 1);
+    }
     try {
         instance?.host?.terminate();        
     } catch (error) {
@@ -570,8 +564,8 @@ const unloadV3Plugin = async (pluginName: string) => {
     }
 }
 
-type PluginPermissionDesc = 'fetchLogs'|'db'|'mainDom'|'replacer'|'provider'|'sendChat';
-const pluginPermissionDescs: PluginPermissionDesc[] = ['fetchLogs', 'db', 'mainDom', 'replacer', 'provider', 'sendChat'];
+type PluginPermissionDesc = 'fetchLogs'|'db'|'mainDom'|'replacer'|'provider'|'sendChat'|'inlay';
+const pluginPermissionDescs: PluginPermissionDesc[] = ['fetchLogs', 'db', 'mainDom', 'replacer', 'provider', 'sendChat', 'inlay'];
 
 // Plugin names are free text (the //@name directive), so `${name}_${desc}` keys
 // can collide — both across permissions and with a legacy name-only entry that
@@ -699,14 +693,11 @@ const isPermissionResolved = async (
 const getPluginPermission = async (pluginName: string, permissionDesc: PluginPermissionDesc, reconfirm: boolean|'periodically' = false) => {
     await ensurePluginPermissionStateLoaded()
 
-    // Recomputed (not captured) so a periodic reconfirm reflects the latest
-    // lastGrantTime: when several identical requests queue together, an earlier
-    // one may refresh it, making the reconfirm no longer due for the rest.
+    // 'periodically' grants are permanent: a (plugin, permission) pair is asked
+    // once and only re-prompted for permissions the plugin never requested
+    // before, matching the Android/extension model. Upstream's 3-day expiry was
+    // removed — it re-asked when nothing changed. Per-plugin reset still clears.
     const computeRequiresReconfirm = () => {
-        if(reconfirm === 'periodically'){
-            const lastGrantTime = permissionCache.get(permissionKeyOf(pluginName, permissionDesc) + '_lastGrantTime') as number | undefined;
-            return !lastGrantTime || Date.now() - lastGrantTime > 3 * 24 * 60 * 60 * 1000; //3 days
-        }
         return reconfirm === true;
     }
 
@@ -719,8 +710,8 @@ const getPluginPermission = async (pluginName: string, permissionDesc: PluginPer
 
     const showDialog = async (): Promise<boolean> => {
         // Re-check under the lock: an earlier queued dialog for the same plugin
-        // may have already granted/denied (or refreshed a periodic grant) while
-        // we were waiting our turn — recompute reconfirm so we don't re-prompt.
+        // may have already granted/denied while we were waiting our turn, so we
+        // don't re-prompt.
         const requiresReconfirm = computeRequiresReconfirm()
         const recheck = await isPermissionResolved(pluginName, permissionDesc, requiresReconfirm)
         if (recheck.resolved) {
@@ -735,6 +726,7 @@ const getPluginPermission = async (pluginName: string, permissionDesc: PluginPer
             : permissionDesc === 'replacer' ? language.replacerPermissionConsent.replace("{}", pluginName)
             : permissionDesc === 'provider' ? language.providerPermissionConsent.replace("{}", pluginName)
             : permissionDesc === 'sendChat' ? language.sendChatConsent.replace("{}", pluginName)
+            : permissionDesc === 'inlay' ? language.inlayPermissionConsent.replace("{}", pluginName)
             : `Error`
         if(alertTitle === 'Error'){
             return false;
@@ -745,14 +737,14 @@ const getPluginPermission = async (pluginName: string, permissionDesc: PluginPer
             permissionGivenPlugins.add(permissionKey);
             permissionDeniedPlugins.delete(permissionKey);
             permissionCache.set(pluginHash, true);
-            if(reconfirm === 'periodically'){
-                permissionCache.set(permissionKeyOf(pluginName, permissionDesc) + '_lastGrantTime', Date.now());
-            }
             await persistPluginPermissionState()
             return true;
         }
         permissionDeniedPlugins.add(permissionKey);
         await persistPluginPermissionState()
+        // Denials are permanent, so tell the user how to undo a misclick.
+        // Awaited so the next queued permission dialog doesn't overwrite it.
+        await alertNormalWait(language.pluginPermissionDenyGuide.replace("{}", pluginName))
         return false;
     }
 
@@ -781,6 +773,20 @@ const authorizationHeaders = [
 const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
 
     const oldApis = getV2PluginAPIs();
+    // Same character as oldApis.getChar/setChar, but with lazy assets filled
+    // on read and the manifest kept on an assets-unchanged write (#80).
+    const getCharacterForPlugin = async () => {
+        const char = DBState.db.characters?.[get(selectedCharID)]
+        return await hydratePluginCharacterSnapshot(char ? $state.snapshot(char) : char)
+    }
+    const setCharacterForPlugin = (char: any) => {
+        oldApis.setChar(restorePluginCharacterManifest(char, DBState.db.characters?.[get(selectedCharID)]))
+    }
+    const withPluginName = (options: any) => ({
+        ...(options ?? {}),
+        ...(options?.logCategory ? {} : { logCategory: 'other', logSource: 'plugin' }),
+        logPlugin: plugin.name,
+    })
     return {
 
         //Old APIs from v2.1
@@ -799,7 +805,7 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
                     console.warn(`Request contains potentially sensitive header '${headerName}'. handling of such headers may be changed to only work with nativeFetch.`);
                 }
             }
-            return oldApis.risuFetch(url, options);
+            return oldApis.risuFetch(url, withPluginName(options));
         },
         nativeFetch: (url, options) => {
             for(const blocked of urlBlacklist){
@@ -815,22 +821,25 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
                     console.warn(`Request contains potentially sensitive header '${headerName}'. handling of such headers may be changed to use server-side approch with write-only api access in the future for better security.`);
                 }
             }
-            return oldApis.nativeFetch(url, options);
+            return oldApis.nativeFetch(url, withPluginName(options));
         },
-        getChar: oldApis.getChar,
-        setChar: oldApis.setChar,
+        getChar: getCharacterForPlugin,
+        setChar: setCharacterForPlugin,
         addProvider: (name: string, func: (arg: PluginV2ProviderArgument, abortSignal?: AbortSignal) => Promise<{ success: boolean, content: string | ReadableStream<string> }>, options?: PluginV3ProviderOptions) => {
             console.warn(`[WARN] addProvider is a powerful API that can potentially be unsafe if used incorrectly. addProvider's functionality might be limited or changed in future updates to ensure security. please use other APIs if possible.`);
             let provs = get(customProviderStore)
             provs.push(name)
-            const providerFunction = async (arg: PluginV2ProviderArgument, abortSignal?: AbortSignal) => {
-               await getPluginPermission(plugin.name, 'provider', 'periodically');
+            const provider = async (arg: PluginV2ProviderArgument, abortSignal?: AbortSignal) => {
+               const conf = await getPluginPermission(plugin.name, 'provider', 'periodically');
+               if(!conf){
+                   return { success: false, content: `Provider permission denied for plugin '${plugin.name}'` };
+               }
                //mode is overridden to v3, due to vulnerabilities using mode.
                //Alternative to mode will be added in future
                arg.mode = 'v3'
                return await func(arg, abortSignal);
             }
-            pluginV2.providers.set(name, providerFunction)
+            pluginV2.providers.set(name, provider)
             pluginV2.providerOptions.set(name, options ?? {})
             customProviderStore.set(provs)
 
@@ -847,22 +856,23 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
                 tokenizer:options?.model?.tokenizer ??  LLMTokenizer.Unknown
             }
             customV3ProviderMetaStore.push(modelData);
-
             addPluginUnloadCallback(plugin.name, () => {
-                if(pluginV2.providers.get(name) === providerFunction){
-                    pluginV2.providers.delete(name)
-                    pluginV2.providerOptions.delete(name)
+                if(pluginV2.providers.get(name) !== provider) return;
+                pluginV2.providers.delete(name);
+                pluginV2.providerOptions.delete(name);
 
-                    const currentProviders = get(customProviderStore)
-                        .filter((providerName) => providerName !== name)
-                    customProviderStore.set(currentProviders)
+                const currentProviders = get(customProviderStore);
+                const providerIndex = currentProviders.indexOf(name);
+                if(providerIndex !== -1){
+                    currentProviders.splice(providerIndex, 1);
+                    customProviderStore.set(currentProviders);
                 }
 
-                const metaIndex = customV3ProviderMetaStore.indexOf(modelData)
+                const metaIndex = customV3ProviderMetaStore.indexOf(modelData);
                 if(metaIndex !== -1){
-                    customV3ProviderMetaStore.splice(metaIndex, 1)
+                    customV3ProviderMetaStore.splice(metaIndex, 1);
                 }
-            })
+            });
         },
         addTTSPreprocessor: async (
             func: TTSHookFn<BeforeTTSContext, BeforeTTSResult>,
@@ -887,11 +897,25 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             oldApis.addRisuReplacer(name, func as any);
         },
         removeRisuReplacer: oldApis.removeRisuReplacer,
+        addRisuChatListener: async (mode:'output', func:Function) => {
+            //permission check, lets use same as replacer
+            const conf = await getPluginPermission(plugin.name, 'replacer', 'periodically');
+            if(!conf){
+                return;
+            }
+            oldApis.addRisuChatListener(mode, func as any);
+            addPluginUnloadCallback(plugin.name, () => oldApis.removeRisuChatListener(mode, func as any));
+        },
+        removeRisuChatListener: oldApis.removeRisuChatListener,
         setDatabaseLite: oldApis.setDatabaseLite,
         setDatabase: oldApis.setDatabase,
         loadPlugins: oldApis.loadPlugins,
         readImage: oldApis.readImage,
         readInlay: async (id: string) => {
+            const conf = await getPluginPermission(plugin.name, 'inlay', 'periodically');
+            if(!conf){
+                return null;
+            }
             return await getInlayAsset(id);
         },
         saveAsset: oldApis.saveAsset,
@@ -908,6 +932,22 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
                     continue;
                 }
                 (liteDB as any)[key] = $state.snapshot((db as any)[key]);
+            }
+            // Lazy asset manifests are filled here for modules, persona-embedded
+            // modules (#80 follow-up) and characters — a plugin reading the
+            // database instead of getCharacter* must see the same shape.
+            await hydratePluginDatabaseSnapshot(liteDB);
+            // Plugin values live on the server, so the DB field is always {}.
+            // Fill it with every stored value only when the user allowed it
+            // for this plugin (see wantsFullPluginStorage); otherwise say once
+            // why it is empty.
+            if (PLUGIN_CUSTOM_STORAGE_KEY in liteDB) {
+                if (wantsFullPluginStorage(plugin)) {
+                    (liteDB as any)[PLUGIN_CUSTOM_STORAGE_KEY] = await pluginStorageStore.snapshotAll();
+                } else if (!fullStorageHintShown.has(plugin.name)) {
+                    fullStorageHintShown.add(plugin.name);
+                    console.warn(`[RisuAI Plugin: ${plugin.name}] getDatabase() returns an empty pluginCustomStorage on PocketRisu. Read other plugins' values with pluginStorage.getItem(key), or allow full storage access for this plugin in Settings > Plugins. See docs/en/plugin-storage.md.`);
+                }
             }
             return liteDB;
         },
@@ -999,12 +1039,12 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
                 }
             }
         },
-        getCharacterFromIndex: (index:number) => {
+        getCharacterFromIndex: async (index:number) => {
             const db = DBState.db
             const charIds = Object.keys(db.characters);
             const charId = charIds[index];
             if(charId){
-                return $state.snapshot(db.characters[charId]);
+                return await hydratePluginCharacterSnapshot($state.snapshot(db.characters[charId]));
             }
             return null;
         },
@@ -1013,7 +1053,7 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             const charIds = Object.keys(db.characters);
             const charId = charIds[index];
             if(charId){
-                DBState.db.characters[charId] = char
+                DBState.db.characters[charId] = restorePluginCharacterManifest(char, db.characters[charId])
             }
         },
         getChatFromIndex: (characterIndex:number, chatIndex:number) => {
@@ -1060,8 +1100,8 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             return $state.snapshot(characterLore.concat(chatLore).concat(moduleLore))
         },
         //New names for character APIs, to match API naming conventions
-        getCharacter: oldApis.getChar,
-        setCharacter: oldApis.setChar,
+        getCharacter: getCharacterForPlugin,
+        setCharacter: setCharacterForPlugin,
 
         showContainer: (
             //more types may be added in future
@@ -1365,24 +1405,34 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             
             return v;
         },
-        _getPluginStorage: oldApis.pluginStorage.getItem,
-        // Wrapped (not aliased) so we can record the originating plugin into the
-        // sidecar meta map. The value write is unchanged; reads stay aliased.
-        _setPluginStorage: (key: string, value: any) => {
-            oldApis.pluginStorage.setItem(key, value)
+        // Plugin storage is server-backed and read on demand (see
+        // pluginStorageStore). V3 calls are already async over postMessage, so
+        // awaiting here keeps the plugin-facing contract unchanged. Writes also
+        // record the originating plugin into the sidecar meta map.
+        _getPluginStorage: async (key: string) => {
+            return (await pluginStorageStore.getItem(key)) || null
+        },
+        _setPluginStorage: async (key: string, value: any) => {
+            try {
+                await pluginStorageStore.setItem(key, value)
+            } catch (e) {
+                // Plugins already handle `written === false` (LIBRA/Flashback).
+                console.error(`[RisuAI Plugin: ${plugin.name}] pluginStorage.setItem("${key}") failed`, e)
+                return false
+            }
             recordOwner('save', key, plugin.name)
         },
-        _removePluginStorage: (key: string) => {
-            oldApis.pluginStorage.removeItem(key)
+        _removePluginStorage: async (key: string) => {
+            await pluginStorageStore.removeItem(key)
             removeOwner('save', key)
         },
-        _clearPluginStorage: () => {
-            oldApis.pluginStorage.clear()
+        _clearPluginStorage: async () => {
+            await pluginStorageStore.clear()
             clearOwners('save')
         },
-        _keyPluginStorage: oldApis.pluginStorage.key,
-        _keysPluginStorage: oldApis.pluginStorage.keys,
-        _lengthPluginStorage: oldApis.pluginStorage.length,
+        _keyPluginStorage: pluginStorageStore.key,
+        _keysPluginStorage: pluginStorageStore.keys,
+        _lengthPluginStorage: pluginStorageStore.length,
         _getSafeLocalStorage: oldApis.safeLocalStorage.getItem,
         _setSafeLocalStorage: (key: string, value: string) => {
             oldApis.safeLocalStorage.setItem(key, value)
@@ -1544,9 +1594,11 @@ type V3PluginInstance = {
 
 const v3PluginInstances: V3PluginInstance[] = [];
 
+// Plugins already told (once per session) why pluginCustomStorage is empty.
+const fullStorageHintShown = new Set<string>()
+
 export async function loadV3Plugins(plugins:RisuPlugin[]){
-    const instancesToUnload = [...v3PluginInstances];
-    await Promise.all(instancesToUnload.map(async (instance) => {
+    await Promise.all([...v3PluginInstances].map(async (instance) => {
         await unloadV3Plugin(instance.name);
     }));
 
