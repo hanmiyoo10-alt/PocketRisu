@@ -441,9 +441,18 @@ v1.11.2 live 운영 중 Provider Manager 진입 시
 조금 더 기다린 뒤 정상 ready가 되었으므로
 고정 4초 sleep만을 readiness 판정 기준으로 사용하지 않는다.
 
-현재 v1.12.0은 이 문서 시점에서 아직 live 배포 완료 상태가 아니다.
-검증된 merge candidate를 commit/push한 뒤 Git 배포 updater의
-실제 새-target `--apply` 경로로 별도 배포 검증한다.
+현재 v1.12.0 + auto-sweep hotfix는 live 배포 완료 상태다.
+
+- merge commit: `d688ebd6ecdf9b7bc9ff18231d3a686442a373e0`
+- hotfix / live HEAD: `83464f845a8d34d147dd24f8bdd07c2b8a9f343f`
+- package version: `1.12.0`
+- Git 배포 updater 실제 새-target `--apply`: PASS
+- 배포 후 `/api/health`: ready
+
+최초 실제 `--apply`는 기존 live 프로세스가 auto-sweep queue deadlock
+상태여서 SIGTERM 종료 단계에서 실패했고, 파일 전환 전에 중단되었다.
+클라이언트를 닫고 stuck 프로세스를 재기동한 뒤 graceful stop을 확인했고,
+hotfix push 후 재실행한 `--apply`는 정상 완료되었다.
 
 ## Auto-sweep queue deadlock hotfix
 
