@@ -192,3 +192,95 @@ upstream에서 직접 server checkout을 갱신하는 것이 아니라
 - 로컬 테스트용 untracked 파일
 
 현재 `generic_mock_bridge.cjs`는 의도적으로 untracked 상태를 유지한다.
+
+## Git 배포 updater 구현
+
+Termux Git checkout 전용 updater는 다음 파일로 별도 구현한다.
+
+- `scripts/termux/update-git-deploy.sh`
+
+upstream의 portable updater인 `update.sh`와 `scripts/updater.cjs`는
+Git checkout 배포에 재사용하거나 수정하지 않는다.
+
+### 실행 모드
+
+`--check`는 다음 작업만 수행한다.
+
+- 현재 branch / remote / tracking 계약 검증
+- tracked worktree clean 여부 확인
+- 허용된 untracked 파일 확인
+- `fork/deploy/termux-pocketrisu` fetch
+- 현재 HEAD와 원격 target의 fast-forward 관계 확인
+- update 가능 여부 보고
+- 현재 `/api/health` 확인
+
+`--check`는 HEAD, `dist/`, `node_modules/`, 서비스 상태를 변경하지 않는다.
+
+`--apply`는 updater 자체가 현재 HEAD에 tracked/committed된 경우에만 허용한다.
+
+### update 적용 순서
+
+update가 존재할 경우 다음 순서를 사용한다.
+
+1. 검증된 `fork/deploy/termux-pocketrisu` target을 fetch한다.
+2. 현재 HEAD가 target의 ancestor인지 확인해 fast-forward update만 허용한다.
+3. detached 임시 Git worktree에서 target을 checkout한다.
+4. 임시 worktree에서 `pnpm install --frozen-lockfile`을 수행한다.
+5. 임시 worktree에서 `pnpm build`와
+   `node --check server/node/server.cjs`를 수행한다.
+6. candidate build가 tracked 파일을 변경하지 않았는지 확인한다.
+7. candidate `dist/`를 runtime state 영역에 staging한다.
+8. live 전환 직전에 branch, HEAD, tracked tree, untracked set,
+   fetched target, 실제 remote tip을 다시 검증한다.
+9. 현재 서비스가 여전히 `/api/health` ready인지 확인한다.
+10. 현재 `dist/`와 rollback commit을 기록한다.
+11. PocketRisu 서비스를 정지한다.
+12. 실제 checkout에는 `git merge --ff-only`로만 target을 적용한다.
+13. warmed pnpm store를 사용해
+    `pnpm install --offline --frozen-lockfile`을 수행한다.
+14. 미리 검증한 candidate `dist/`를 설치한다.
+15. 서버 syntax와 tracked/untracked 계약을 다시 확인한다.
+16. 서비스를 시작하고 `/api/health`가 ready가 될 때까지 확인한다.
+
+현재 서비스가 서빙 중인 `dist/`에서 직접 candidate build를 수행하지 않는다.
+candidate build는 반드시 별도 temporary worktree에서 먼저 끝낸다.
+
+### rollback 계약
+
+live 전환 이후 실패하면 이전 commit과 이전 `dist/`로 자동 rollback을 시도한다.
+
+rollback은 다음 원칙을 따른다.
+
+- `git reset --hard`를 사용하지 않는다.
+- branch ref는 예상한 target에서만 이전 commit으로 되돌린다.
+- tracked 파일은 `git restore --source=<old>`로 복원한다.
+- 이전 `dist/` backup을 복원한다.
+- 이전 commit 기준 dependency를 offline frozen install로 복구한다.
+- 서비스를 다시 시작하고 `/api/health`를 확인한다.
+- rollback이 완전히 성공한 경우에만 pending target state를 제거한다.
+- rollback이 불완전하면 runtime recovery directory와 pending state를
+  삭제하지 않고 보존한다.
+
+runtime state/cache는 저장소 밖의 다음 계열 경로를 사용한다.
+
+- `${XDG_STATE_HOME:-$HOME/.local/state}/pocketrisu-git-deploy`
+- `${XDG_CACHE_HOME:-$HOME/.cache}/pocketrisu-git-deploy`
+
+### updater 안전성 검증
+
+구현 후 다음 검증을 수행했다.
+
+- shell syntax: PASS
+- `git reset --hard` / `git clean` 사용 없음
+- 현재 배포 commit에서 `--check`: PASS
+- `--check` 후 HEAD와 live service가 변경되지 않음
+- uncommitted updater에서 `--apply` 차단: PASS
+- 차단 시 fetch/build/service stop까지 진행하지 않음
+- 차단 전후 서비스 PID 동일 및 `/api/health` ready
+- 격리 sandbox에서 committed updater의 non-fast-forward 거부: PASS
+- non-fast-forward 거부 시 candidate build/service stop까지 진행하지 않음
+- sandbox lock / pending target 잔여 없음
+- sandbox 테스트 후 실제 서버폰 HEAD, PID, health 변경 없음
+
+아직 실제 새 target에 대한 live `--apply` 성공/rollback 테스트는 수행하지 않았다.
+첫 실제 update에서는 별도 검증된 fork commit을 대상으로 단계적으로 확인한다.
