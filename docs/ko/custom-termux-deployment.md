@@ -320,3 +320,127 @@ GitHub API로 적용 후 다음 값을 확인했다.
 
 GitHub 화면에서 보이는 default `main` branch의 보호 경고는
 이 별도 배포 브랜치 보호 정책과는 구분한다.
+
+## v1.12.0 통합 후보 검증
+
+PocketRisu upstream v1.12.0은 다음 기준으로 통합 후보를 만들었다.
+
+- 이전 upstream 기준: `ca09a80746e74e5334145e5e78af47ce423e0eba` (v1.11.2)
+- v1.12.0 upstream: `b315d898abd543fffaf5346d8eb3246b20da92cd`
+- upstream 증가분: 15 commits
+- upstream 변경 파일: 70 files
+- package version: `1.12.0`
+
+live checkout을 직접 merge하지 않고
+`$HOME/.cache/pocketrisu-v1.12-merge-candidate` detached worktree에서
+통합 후보를 만들었다.
+
+merge 과정의 content conflict는 다음 한 파일뿐이었다.
+
+- `src/ts/process/index.svelte.ts`
+
+해당 conflict는 양쪽 기능을 모두 보존하는 방식으로 해결했다.
+
+- v1.12.0의 `internalAbort` / `registerAbort()` generation abort 계약 보존
+- Termux 배포 커스텀의 `requestStartedAt` / `responseModelLabel`
+  notification relay 계약 보존
+- 기존 upstream의 `responseStartedAt` 잔재는 제거
+- recursive `sendChat()`에도 request 시작 시각과 model label을 계속 전달
+
+자동 merge된 주요 custom hotspot도 별도로 검사했다.
+
+- `server/node/server.cjs`
+- `src/ts/storage/nodeStorage.ts`
+
+다음 커스텀 계약이 후보에 유지되는 것을 확인했다.
+
+- `/api/termux-notify`
+- relay 대상 `127.0.0.1:39120/notify`
+- `X-PocketRisu-Notify-Token`
+- 서버폰에서 직접 `termux-notification`을 실행하지 않음
+- background DB persist queue / generation / worker launch 계약
+- snapshot restore 전 pending DB flush
+- plugin snapshot atomic restore
+- content-based DB ETag
+- patch hash cache
+- plugin-storage index/all API
+
+후보 검증 결과는 다음과 같다.
+
+- server Node syntax: PASS
+- `pnpm install --frozen-lockfile`: PASS
+- `NODE_OPTIONS="--max-old-space-size=2048" pnpm build`: PASS
+- `dist/index.html`: 확인
+- targeted test suite: 7 files / 180 tests PASS
+- merge conflict marker: 없음
+- live checkout과 live 서비스는 후보 검증 동안 변경하지 않음
+
+### Termux 대형 lorebook regression test
+
+`src/ts/storage/risuSavePatcher.test.ts`의
+
+`character with a huge shifted lorebook does not trip the spread limit`
+
+테스트는 30,000개 lorebook entry를 사용하는 병적 입력 회귀 테스트다.
+
+서버폰 Termux 환경에서는 Vitest 기본 timeout 5초보다 오래 걸려
+기본 설정에서 timeout이 발생했다.
+
+이를 merge 회귀와 구분하기 위해 다음 대조를 수행했다.
+
+- v1.11.2 live baseline도 동일 테스트가 기본 5초 timeout으로 실패
+- v1.12.0은 `src/ts/storage/risuSavePatcher.ts` 구현을 변경하지 않음
+- v1.12 merge candidate의 해당 구현도 live baseline과 동일
+- candidate에서 해당 테스트에 30초 timeout을 적용하면 assertion PASS
+- targeted suite 전체를 `--testTimeout=30000`으로 실행해 180/180 PASS
+
+따라서 이 결과는 v1.12 merge 회귀가 아니라
+서버폰 Termux 환경에서 병적 30k 입력 테스트가 기본 5초를 초과하는
+테스트 실행시간 특성으로 취급한다.
+
+저장소의 테스트 timeout 자체는 이 사유로 변경하지 않는다.
+
+### upstream whitespace
+
+v1.12.0 upstream의 `src/lib/SideBars/Sidebar.svelte`에는
+12개의 trailing-whitespace 항목이 이미 포함되어 있다.
+
+merge candidate의 해당 파일은 pure v1.12.0 upstream과 동일하며,
+우리 custom delta 자체의 `diff --check`는 PASS했다.
+
+따라서 upstream formatting을 이번 통합에서 별도로 정리하지 않고
+upstream 원본을 그대로 유지한다.
+
+## Provider Manager 404 운영 교훈
+
+v1.11.2 live 운영 중 Provider Manager 진입 시
+`pluginStorageIndex failed with HTTP 404`가 발생한 적이 있다.
+
+당시 disk의 `server/node/server.cjs`에는
+`/api/plugin-storage/index` route가 존재했지만,
+장시간 실행 중이던 Node 프로세스는 이전 server 코드를 로드한 상태였다.
+
+서비스 재시작 후 다음 결과를 확인했다.
+
+- `/api/plugin-storage/index` unauthenticated probe: HTTP 400
+- response: `No auth header`
+- 존재하지 않는 control route: HTTP 404
+- `/api/health`: ready
+- 메인폰 Provider Manager: 정상 동작
+
+즉 404 원인은 SSH tunnel이나 메인폰 경로가 아니라
+서버 코드 갱신 후 live Node 프로세스가 재시작되지 않았던 운영 상태였다.
+
+서버 코드 또는 server build를 직접 갱신한 경우에는
+파일 변경만으로 live 적용됐다고 간주하지 않는다.
+
+반드시 PocketRisu 서비스를 재시작하고 `/api/health`가 ready가 될 때까지
+재시도 방식으로 확인한 뒤 메인폰 동작을 검증한다.
+
+이 서버폰에서는 재시작 직후 4초 시점에는 아직 health 연결이 실패했고,
+조금 더 기다린 뒤 정상 ready가 되었으므로
+고정 4초 sleep만을 readiness 판정 기준으로 사용하지 않는다.
+
+현재 v1.12.0은 이 문서 시점에서 아직 live 배포 완료 상태가 아니다.
+검증된 merge candidate를 commit/push한 뒤 Git 배포 updater의
+실제 새-target `--apply` 경로로 별도 배포 검증한다.
