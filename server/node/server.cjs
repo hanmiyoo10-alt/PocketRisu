@@ -57,15 +57,351 @@ let saveTimers = {};
 const SAVE_INTERVAL = 5000;
 let fullChatStore = null; // Map<chaId, Map<chatId, chatObject>> — lazy-initialized
 
-// ETag for database.bin
-let dbEtag = null;
-
-function computeBufferEtag(buffer) {
-    return nodeCrypto.createHash('md5').update(buffer).digest('hex');
+// Opaque revision token for the client-visible database.bin state.
+function makeDbRevisionEtag() {
+    return `rev-${nodeCrypto.randomUUID()}`;
 }
 
-function computeDatabaseEtagFromObject(databaseObject) {
-    return computeBufferEtag(Buffer.from(encodeRisuSaveLegacy(databaseObject)));
+let dbEtag = makeDbRevisionEtag();
+
+function rotateDbEtag() {
+    dbEtag = makeDbRevisionEtag();
+    return dbEtag;
+}
+
+// Compositional hash cache for the STRIPPED database.bin.
+// Keep one contribution per top-level key so a patch only re-hashes
+// the top-level value(s) it actually changed.
+const DB_HASH_EMPTY_OBJECT = calculateHash({});
+let dbHashContributions = null;
+
+// Second-level compositional hash cache for pluginCustomStorage.
+// Its object hash is additive per direct child, so later patches can
+// re-hash only the child key(s) they actually touched.
+const PCS_HASH_KEY = 'pluginCustomStorage';
+const PCS_EMPTY_TOP_CONTRIBUTION = (
+    calculateHash({ [PCS_HASH_KEY]: {} }) - DB_HASH_EMPTY_OBJECT
+) >>> 0;
+let pcsHashContributions = null;
+
+// Third-level cache for object-valued pluginCustomStorage children.
+// Map<pcsChild, Map<subchild, contribution>>
+let pcsSubchildHashContributions = null;
+
+function calculateObjectChildContribution(key, value) {
+    const one = Object.create(null);
+    one[key] = value;
+    return (calculateHash(one) - DB_HASH_EMPTY_OBJECT) >>> 0;
+}
+
+function initPcsHashCache(dbObj) {
+    const storage = dbObj?.[PCS_HASH_KEY];
+
+    // A full second-level rebuild makes every previously derived
+    // third-level child cache potentially stale.
+    pcsSubchildHashContributions = null;
+
+    if (
+        !storage
+        || typeof storage !== 'object'
+        || Array.isArray(storage)
+    ) {
+        pcsHashContributions = null;
+        return;
+    }
+
+    const next = new Map();
+    for (const key of Object.keys(storage)) {
+        next.set(
+            key,
+            calculateObjectChildContribution(key, storage[key])
+        );
+    }
+    pcsHashContributions = next;
+}
+
+function currentPcsTopContributionFromCache() {
+    if (!pcsHashContributions) return null;
+
+    let storageHash = DB_HASH_EMPTY_OBJECT;
+    for (const contribution of pcsHashContributions.values()) {
+        storageHash = (storageHash + contribution) >>> 0;
+    }
+
+    return (
+        PCS_EMPTY_TOP_CONTRIBUTION
+        + ((storageHash - DB_HASH_EMPTY_OBJECT) >>> 0)
+    ) >>> 0;
+}
+
+function currentPcsChildContributionFromSubcache(childKey) {
+    if (!pcsSubchildHashContributions) return null;
+
+    const inner = pcsSubchildHashContributions.get(childKey);
+    if (!inner) return null;
+
+    let childHash = DB_HASH_EMPTY_OBJECT;
+    for (const contribution of inner.values()) {
+        childHash = (childHash + contribution) >>> 0;
+    }
+
+    const emptyChildContribution =
+        calculateObjectChildContribution(childKey, {});
+
+    return (
+        emptyChildContribution
+        + ((childHash - DB_HASH_EMPTY_OBJECT) >>> 0)
+    ) >>> 0;
+}
+
+function invalidatePcsHashCache() {
+    pcsHashContributions = null;
+    pcsSubchildHashContributions = null;
+}
+
+function ensurePcsSubchildHashCacheForChild(dbObj, childKey) {
+    const storage = dbObj?.[PCS_HASH_KEY];
+
+    if (
+        !storage
+        || typeof storage !== 'object'
+        || Array.isArray(storage)
+    ) {
+        return null;
+    }
+
+    const childValue = storage[childKey];
+    if (
+        !childValue
+        || typeof childValue !== 'object'
+        || Array.isArray(childValue)
+    ) {
+        return null;
+    }
+
+    if (!pcsSubchildHashContributions) {
+        pcsSubchildHashContributions = new Map();
+    }
+
+    const existing = pcsSubchildHashContributions.get(childKey);
+    if (existing) {
+        return existing;
+    }
+
+    const inner = new Map();
+    for (const subKey of Object.keys(childValue)) {
+        inner.set(
+            subKey,
+            calculateObjectChildContribution(
+                subKey,
+                childValue[subKey]
+            )
+        );
+    }
+
+    pcsSubchildHashContributions.set(childKey, inner);
+    return inner;
+}
+
+function initDbHashCache(dbObj) {
+    const next = new Map();
+    for (const key of Object.keys(dbObj || {})) {
+        const one = Object.create(null);
+        one[key] = dbObj[key];
+        next.set(key, (calculateHash(one) - DB_HASH_EMPTY_OBJECT) >>> 0);
+    }
+    dbHashContributions = next;
+    initPcsHashCache(dbObj);
+}
+
+function currentDbHashFromCache() {
+    if (!dbHashContributions) return null;
+    let hash = DB_HASH_EMPTY_OBJECT;
+    for (const contribution of dbHashContributions.values()) {
+        hash = (hash + contribution) >>> 0;
+    }
+    return hash.toString(16);
+}
+
+function invalidateDbHashCache() {
+    dbHashContributions = null;
+    invalidatePcsHashCache();
+}
+
+function updateDbHashCacheFromPatch(dbObj, patch) {
+    if (!dbHashContributions) {
+        initDbHashCache(dbObj);
+        return;
+    }
+
+    const touched = new Set();
+    const pcsTouchedChildren = new Set();
+    const pcsTouchedSubchildren = new Map();
+    const pcsChildrenNeedFullRehash = new Set();
+    let pcsNeedsFullRehash = false;
+
+    const decodePointerSegment = (raw) =>
+        raw.replace(/~1/g, '/').replace(/~0/g, '~');
+
+    const addPath = (path) => {
+        if (path === '') {
+            touched.add(null);
+            return;
+        }
+        if (typeof path !== 'string' || !path.startsWith('/')) {
+            touched.add(null);
+            return;
+        }
+
+        const parts = path.slice(1).split('/');
+        const top = decodePointerSegment(parts[0]);
+        touched.add(top);
+
+        if (top !== PCS_HASH_KEY) return;
+
+        // Direct operation on /pluginCustomStorage can replace/remove the
+        // whole object, so child-level incremental hashing is not sufficient.
+        if (parts.length === 1) {
+            pcsNeedsFullRehash = true;
+            return;
+        }
+
+        const child = decodePointerSegment(parts[1]);
+        pcsTouchedChildren.add(child);
+
+        // An operation exactly on /pluginCustomStorage/<child> replaces,
+        // adds, or removes that whole child. Third-level incremental
+        // hashing is unsafe for that child and must fall back.
+        if (parts.length === 2) {
+            pcsChildrenNeedFullRehash.add(child);
+            return;
+        }
+
+        const subchild = decodePointerSegment(parts[2]);
+        let subchildren = pcsTouchedSubchildren.get(child);
+        if (!subchildren) {
+            subchildren = new Set();
+            pcsTouchedSubchildren.set(child, subchildren);
+        }
+        subchildren.add(subchild);
+    };
+
+    for (const op of patch || []) {
+        addPath(op?.path);
+        if (op?.from !== undefined) addPath(op.from);
+    }
+
+    if (touched.has(null)) {
+        initDbHashCache(dbObj);
+        return;
+    }
+
+    for (const key of touched) {
+        if (!Object.prototype.hasOwnProperty.call(dbObj, key)) {
+            dbHashContributions.delete(key);
+            if (key === PCS_HASH_KEY) invalidatePcsHashCache();
+            continue;
+        }
+
+        if (key === PCS_HASH_KEY) {
+            const storage = dbObj[key];
+            const canIncrement =
+                !pcsNeedsFullRehash
+                && pcsHashContributions
+                && storage
+                && typeof storage === 'object'
+                && !Array.isArray(storage);
+
+            if (canIncrement) {
+                for (const child of pcsTouchedChildren) {
+                    if (!Object.prototype.hasOwnProperty.call(storage, child)) {
+                        pcsHashContributions.delete(child);
+                        pcsSubchildHashContributions?.delete(child);
+                        continue;
+                    }
+
+                    const childValue = storage[child];
+                    const subchildren = pcsTouchedSubchildren.get(child);
+                    const canUseDepth3 =
+                        !pcsChildrenNeedFullRehash.has(child)
+                        && subchildren
+                        && subchildren.size > 0
+                        && childValue
+                        && typeof childValue === 'object'
+                        && !Array.isArray(childValue);
+
+                    if (canUseDepth3) {
+                        const subcache =
+                            ensurePcsSubchildHashCacheForChild(dbObj, child);
+
+                        if (subcache) {
+                            for (const subchild of subchildren) {
+                                if (
+                                    Object.prototype.hasOwnProperty.call(
+                                        childValue,
+                                        subchild
+                                    )
+                                ) {
+                                    subcache.set(
+                                        subchild,
+                                        calculateObjectChildContribution(
+                                            subchild,
+                                            childValue[subchild]
+                                        )
+                                    );
+                                } else {
+                                    subcache.delete(subchild);
+                                }
+                            }
+
+                            const rebuilt =
+                                currentPcsChildContributionFromSubcache(child);
+
+                            if (rebuilt !== null) {
+                                pcsHashContributions.set(child, rebuilt);
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Conservative fallback: direct child operation,
+                    // unsupported child type, or unavailable depth-3 cache.
+                    pcsSubchildHashContributions?.delete(child);
+                    pcsHashContributions.set(
+                        child,
+                        calculateObjectChildContribution(
+                            child,
+                            childValue
+                        )
+                    );
+                }
+
+                const topContribution = currentPcsTopContributionFromCache();
+                if (topContribution !== null) {
+                    dbHashContributions.set(key, topContribution);
+                    continue;
+                }
+            }
+
+            // Conservative fallback for direct-root replacement, unexpected
+            // storage type, or unavailable second-level cache.
+            const one = Object.create(null);
+            one[key] = storage;
+            dbHashContributions.set(
+                key,
+                (calculateHash(one) - DB_HASH_EMPTY_OBJECT) >>> 0
+            );
+            initPcsHashCache(dbObj);
+            continue;
+        }
+
+        const one = Object.create(null);
+        one[key] = dbObj[key];
+        dbHashContributions.set(
+            key,
+            (calculateHash(one) - DB_HASH_EMPTY_OBJECT) >>> 0
+        );
+    }
 }
 
 let storageOperationQueue = Promise.resolve();
@@ -73,6 +409,270 @@ function queueStorageOperation(operation) {
     const operationRun = storageOperationQueue.then(operation, operation);
     storageOperationQueue = operationRun.catch(() => {});
     return operationRun;
+}
+
+// ─── Background DB persist state (Worker 2D) ────────────────────────────────
+//
+// Unlike the failed 2C design, a Worker must NEVER hold storageOperationQueue
+// while msgpack encoding. The queue is used only to capture a coherent
+// generation and later to commit the encoded result if it is still current.
+let dbMutationGeneration = 0;
+let backgroundDbPersist = null;
+
+function noteDbMutation() {
+    dbMutationGeneration += 1;
+    return dbMutationGeneration;
+}
+
+function createBackgroundEncodeJob(value) {
+    const { Worker } = require('worker_threads');
+    const workerPath = require('path').join(
+        __dirname,
+        'risu-save-background-worker.cjs'
+    );
+
+    const worker = new Worker(workerPath);
+
+    const job = {
+        worker,
+        cancelled: false,
+        settled: false,
+        promise: null,
+    };
+
+    job.promise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            if (job.settled) return;
+            job.settled = true;
+            worker.removeAllListeners();
+            worker.terminate().catch(() => {});
+            reject(new Error('Background RisuSave encode timed out after 30s'));
+        }, 30000);
+
+        function cleanup() {
+            clearTimeout(timeout);
+            worker.removeAllListeners();
+        }
+
+        worker.once('message', message => {
+            if (job.settled) return;
+            job.settled = true;
+            cleanup();
+
+            if (job.cancelled) {
+                resolve(null);
+                return;
+            }
+
+            if (!message?.ok || !(message.encoded instanceof Uint8Array)) {
+                reject(new Error(
+                    message?.error ||
+                    'Background RisuSave worker returned invalid data'
+                ));
+                return;
+            }
+
+            const encoded = Buffer.from(
+                message.encoded.buffer,
+                message.encoded.byteOffset,
+                message.encoded.byteLength
+            );
+
+            worker.terminate().catch(() => {});
+            resolve(encoded);
+        });
+
+        worker.once('error', error => {
+            if (job.settled) return;
+            job.settled = true;
+            cleanup();
+
+            if (job.cancelled) {
+                resolve(null);
+            } else {
+                reject(error);
+            }
+        });
+
+        worker.once('exit', code => {
+            if (job.settled) return;
+            job.settled = true;
+            cleanup();
+
+            if (job.cancelled) {
+                resolve(null);
+            } else {
+                reject(new Error(
+                    `Background RisuSave worker exited before reply (code=${code})`
+                ));
+            }
+        });
+
+        try {
+            worker.postMessage(value);
+        } catch (error) {
+            if (!job.settled) {
+                job.settled = true;
+                cleanup();
+                worker.terminate().catch(() => {});
+                reject(error);
+            }
+        }
+    });
+
+    return job;
+}
+
+function cancelBackgroundDbPersist(reason = 'cancelled') {
+    const state = backgroundDbPersist;
+    if (!state) return false;
+
+    backgroundDbPersist = null;
+    state.job.cancelled = true;
+
+    try {
+        state.job.worker.terminate().catch(() => {});
+    } catch {}
+
+    logger.info(
+        `[BackgroundPersist] cancelled source=${state.source}`
+        + ` generation=${state.generation} reason=${reason}`
+    );
+
+    return true;
+}
+
+function launchBackgroundDbPersist(fullDb, generation, source) {
+    // There should normally be at most one encode after the 5s debounce.
+    // If another job somehow survives until a newer one starts, the old result
+    // must never be allowed to commit.
+    cancelBackgroundDbPersist('superseded');
+
+    const losses = findStubFlagLossChats(fullDb);
+    if (losses.length > 0) {
+        const sample = losses
+            .slice(0, 3)
+            .map(l => `${l.chaId}/${l.chatId ?? l.chatIndex}`)
+            .join(', ');
+
+        const error = new Error(
+            `background persist aborted: ${losses.length} chat(s) lost _stub flag`
+            + ` without upgrade. sample=[${sample}]`
+        );
+
+        recordPersistFailure(error, `background:${source}:stub-flag-loss`);
+        throw error;
+    }
+
+    const job = createBackgroundEncodeJob(fullDb);
+    const state = {
+        job,
+        generation,
+        source,
+        fullDb,
+    };
+
+    backgroundDbPersist = state;
+
+    job.promise
+        .then(encoded => {
+            if (!encoded) return;
+
+            return queueStorageOperation(async () => {
+                // Cancel/replacement already owns this slot.
+                if (backgroundDbPersist !== state) return;
+
+                backgroundDbPersist = null;
+
+                // Something changed while the Worker was encoding.
+                // Never commit an old database snapshot.
+                if (generation !== dbMutationGeneration) {
+                    logger.info(
+                        `[BackgroundPersist] stale result discarded`
+                        + ` source=${source}`
+                        + ` generation=${generation}`
+                        + ` current=${dbMutationGeneration}`
+                    );
+                    return;
+                }
+
+                try {
+                    kvSet('database/database.bin', encoded);
+
+                    // Safe only because generation is still identical:
+                    // fullDb is exactly the state that just hit disk.
+                    initChatStore(fullDb);
+
+                    clearPersistFailure();
+
+                    try {
+                        createBackupAndRotate();
+                    } catch (backupError) {
+                        logger.warn(
+                            '[BackgroundPersist] Backup rotation failed:',
+                            backupError
+                        );
+                    }
+
+                    logger.info(
+                        `[BackgroundPersist] committed source=${source}`
+                        + ` generation=${generation}`
+                        + ` bytes=${encoded.length}`
+                    );
+                } catch (error) {
+                    if (error && typeof error === 'object') {
+                        try {
+                            error.attemptedSize = encoded.length;
+                        } catch {}
+                    }
+
+                    recordPersistFailure(error, `background:${source}`);
+                    throw error;
+                }
+            });
+        })
+        .catch(error => {
+            if (job.cancelled) return;
+
+            if (backgroundDbPersist === state) {
+                backgroundDbPersist = null;
+            }
+
+            logger.error(
+                `[BackgroundPersist] ${source} failed:`,
+                error
+            );
+            recordPersistFailure(error, `background:${source}`);
+        });
+
+    logger.info(
+        `[BackgroundPersist] launched source=${source}`
+        + ` generation=${generation}`
+    );
+
+    return state;
+}
+
+async function launchBackgroundDbPersistFromCurrentState(source) {
+    // Called while storageOperationQueue is held.
+    //
+    // Keep this section short: assemble the current coherent DB snapshot and
+    // start structured-clone into the Worker, then return immediately.
+    //
+    // If the stripped cache does not exist, callers retain the old synchronous
+    // fallback instead of introducing a new decode path here.
+    if (!dbCache[DB_HEX_KEY]) return false;
+
+    await ensureChatStore();
+
+    const strippedDb = dbCache[DB_HEX_KEY];
+    if (!strippedDb) return false;
+
+    const generation = dbMutationGeneration;
+    const fullDb = reassembleFullDb(strippedDb);
+
+    launchBackgroundDbPersist(fullDb, generation, source);
+    return true;
 }
 
 const DB_HEX_KEY = Buffer.from('database/database.bin', 'utf-8').toString('hex');
@@ -214,10 +814,18 @@ function createBackupAndRotate() {
     trimSnapshotsToLimits();
 }
 
-async function flushPendingDb() {
-    if (saveTimers[DB_HEX_KEY]) {
-        clearTimeout(saveTimers[DB_HEX_KEY]);
-        delete saveTimers[DB_HEX_KEY];
+// Flush implementation for callers that ALREADY hold storageOperationQueue.
+// Do not call queueStorageOperation() from here or queue-held callers would
+// deadlock waiting on themselves.
+async function flushPendingDbUnlocked() {
+    const hadBackgroundPersist = cancelBackgroundDbPersist('flush');
+
+    if (saveTimers[DB_HEX_KEY] || hadBackgroundPersist) {
+        if (saveTimers[DB_HEX_KEY]) {
+            clearTimeout(saveTimers[DB_HEX_KEY]);
+            delete saveTimers[DB_HEX_KEY];
+        }
+
         if (dbCache[DB_HEX_KEY]) {
             await persistDbCacheWithChats(DB_HEX_KEY, 'database/database.bin');
         } else if (fullChatStore && fullChatStore.size > 0) {
@@ -233,14 +841,23 @@ async function flushPendingDb() {
     }
 }
 
+// Public flush helper for callers that do NOT already hold the storage queue.
+async function flushPendingDb() {
+    return queueStorageOperation(flushPendingDbUnlocked);
+}
+
 function invalidateDbCache() {
+    cancelBackgroundDbPersist('invalidate-cache');
+    noteDbMutation();
+
     delete dbCache[DB_HEX_KEY];
+    invalidateDbHashCache();
     fullChatStore = null;
     if (saveTimers[DB_HEX_KEY]) {
         clearTimeout(saveTimers[DB_HEX_KEY]);
         delete saveTimers[DB_HEX_KEY];
     }
-    dbEtag = null;
+    rotateDbEtag();
 }
 
 // ─── Chat runtime lazy load helpers ─────────────────────────────────────────
@@ -539,7 +1156,6 @@ async function migrateRemoteBlocksIfNeeded() {
     // Reset in-memory caches whose contents were derived from the pre-migration
     // bytes — next reader recomputes from the migrated database.bin.
     invalidateDbCache();
-    dbEtag = null;
 
     const characterCount = Array.isArray(dbObj.characters) ? dbObj.characters.length : 0;
     logger.info(`[Migration] Remote-block migration complete. Inlined ${characterCount} character(s); pre-migration backup at ${backupKey}`);
@@ -549,20 +1165,46 @@ async function migrateRemoteBlocksIfNeeded() {
 /**
  * Ensure fullChatStore is initialized. Loads from disk if needed.
  */
-async function ensureChatStore() {
-    if (fullChatStore) return;
+async function ensureDbRuntimeCache() {
+    if (fullChatStore && dbCache[DB_HEX_KEY]) return;
+
     // Run remote-block migration first so the decode below sees an inline DB.
     // Idempotent — skipped on every subsequent call.
     await migrateRemoteBlocksIfNeeded();
+
     const raw = kvGet('database/database.bin');
+
     if (!raw) {
-        fullChatStore = new Map();
+        if (!fullChatStore) {
+            fullChatStore = new Map();
+        }
+        if (!dbCache[DB_HEX_KEY]) {
+            dbCache[DB_HEX_KEY] = {};
+            initDbHashCache(dbCache[DB_HEX_KEY]);
+        }
         return;
     }
+
     const dbObj = await decodeDatabaseWithPersistentChatIds(raw, {
         createBackup: true,
     });
-    initChatStore(dbObj);
+
+    // Never replace an already-live fullChatStore merely because the stripped
+    // cache was missing: it may contain newer chat-content updates that have
+    // not reached disk yet.
+    if (!fullChatStore) {
+        initChatStore(dbObj);
+    }
+
+    if (!dbCache[DB_HEX_KEY]) {
+        dbCache[DB_HEX_KEY] = normalizeJSON(stripChatsFromDb(dbObj));
+        initDbHashCache(dbCache[DB_HEX_KEY]);
+    }
+}
+
+async function ensureChatStore() {
+    if (fullChatStore) return;
+    await ensureDbRuntimeCache();
 }
 
 // Stub metadata fields a JSON Patch may legitimately touch on a `chats[i]`
@@ -695,6 +1337,7 @@ async function persistDbCacheWithChats(filePath, decodedKey) {
             );
             recordPersistFailure(err, 'persistDbCacheWithChats:stub-flag-loss');
             delete dbCache[filePath];
+            invalidateDbHashCache();
             throw err;
         }
     }
@@ -764,6 +1407,85 @@ app.use('/assets', express.static(path.join(process.cwd(), 'dist/assets'), {
 }));
 app.use(express.static(path.join(process.cwd(), 'dist'), {index: false, maxAge: 0}));
 app.use(express.json({ limit: '100mb' }));
+
+// PocketRisu -> Termux native Android notification
+// Lightweight readiness endpoint for local-stack health checks.
+// Keep this intentionally cheap: no database, disk, or external network probes.
+app.get('/api/health', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json({
+        ok: true,
+        status: 'ready',
+        uptimeSec: Number(process.uptime().toFixed(1))
+    });
+});
+
+app.post('/api/termux-notify', async (req, res) => {
+    const addr = String(req.socket.remoteAddress || '');
+    const isLoopback =
+        addr === '127.0.0.1' ||
+        addr === '::1' ||
+        addr === '::ffff:127.0.0.1';
+
+    if (!isLoopback) {
+        return res.status(403).json({ error: 'localhost only' });
+    }
+
+    const relayTokenFile = path.join(
+        process.env.HOME || process.cwd(),
+        '.config',
+        'pocketrisu-notify-relay',
+        'token'
+    );
+
+    let relayToken = '';
+
+    try {
+        relayToken = require('fs')
+            .readFileSync(relayTokenFile, 'utf8')
+            .trim();
+    } catch (error) {
+        console.error('[TermuxNotifyRelay] token read failed', error);
+        return res.status(503).json({
+            error: 'notification relay unavailable'
+        });
+    }
+
+    if (!relayToken) {
+        return res.status(503).json({
+            error: 'notification relay unavailable'
+        });
+    }
+
+    try {
+        const relay = await fetch(
+            'http://127.0.0.1:39120/notify',
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-PocketRisu-Notify-Token': relayToken
+                },
+                body: JSON.stringify(req.body ?? {}),
+                signal: AbortSignal.timeout(5000)
+            }
+        );
+
+        if (!relay.ok) {
+            return res.status(502).json({
+                error: 'notification relay failed'
+            });
+        }
+
+        return res.status(200).json({ ok: true });
+    } catch (error) {
+        console.error('[TermuxNotifyRelay]', error);
+        return res.status(502).json({
+            error: 'notification relay failed'
+        });
+    }
+});
+
 app.use((req, res, next) => {
     // Skip express.raw() for backup import — it must stream, not buffer into memory
     if (req.path === '/api/backup/import') return next();
@@ -3322,6 +4044,7 @@ app.get('/api/read', async (req, res, next) => {
                     const stripped = normalizeJSON(stripChatsFromDb(dbObj));
                     // Populate dbCache so patch endpoint uses the same data
                     dbCache[filePath] = stripped;
+                    initDbHashCache(stripped);
                     value = Buffer.from(encodeRisuSaveLegacy(stripped));
                 } catch (e) {
                     // Log the Error itself (not just e.message) so logger.*
@@ -3329,7 +4052,7 @@ app.get('/api/read', async (req, res, next) => {
                     logger.error('[Read] Failed to strip chats from database.bin', e);
                     return next(e);
                 }
-                dbEtag = computeBufferEtag(value);
+                if (!dbEtag) rotateDbEtag();
                 if (req.headers['if-none-match'] === dbEtag) {
                     return res.status(304).end();
                 }
@@ -3559,9 +4282,16 @@ app.post('/api/write', async (req, res, next) => {
                     }
 
                     const mergedContent = Buffer.from(encodeRisuSaveLegacy(fullDb));
-                    // Re-init chat store from merged result
-                    initChatStore(fullDb);
+
+                    // Commit first. If kvSet fails, do not cancel an older
+                    // pending persist merely because this write attempt failed.
                     kvSet(key, mergedContent);
+
+                    cancelBackgroundDbPersist('/api/write');
+                    noteDbMutation();
+
+                    // Re-init chat store only after the new blob reached KV.
+                    initChatStore(fullDb);
                 } catch (e) {
                     logger.error('[Write] Failed to merge chats into database.bin:', e.message);
                     // Do NOT write stubs-only to disk — that would permanently
@@ -3576,12 +4306,13 @@ app.post('/api/write', async (req, res, next) => {
             // Update ETag, backup, and invalidate cache after database.bin write
             if (key === 'database/database.bin') {
                 delete dbCache[DB_HEX_KEY];
+                invalidateDbHashCache();
                 if (saveTimers[DB_HEX_KEY]) {
                     clearTimeout(saveTimers[DB_HEX_KEY]);
                     delete saveTimers[DB_HEX_KEY];
                 }
-                // ETag based on stripped version (what client sees)
-                dbEtag = computeBufferEtag(fileContent);
+                // Full write committed a new client-visible database revision.
+                rotateDbEtag();
                 createBackupAndRotate();
             }
 
@@ -3602,7 +4333,7 @@ app.post('/api/write', async (req, res, next) => {
 app.post('/api/db/flush', sessionAuthMiddleware, async (req, res, next) => {
     try {
         await queueStorageOperation(async () => {
-            await flushPendingDb();
+            await flushPendingDbUnlocked();
             res.send({
                 success: true,
                 etag: dbEtag ?? undefined
@@ -3651,11 +4382,15 @@ app.post('/api/patch', async (req, res, next) => {
                     if (decodedKey === 'database/database.bin') {
                         initChatStore(decoded);
                         dbCache[filePath] = normalizeJSON(stripChatsFromDb(decoded));
+                        initDbHashCache(dbCache[filePath]);
                     } else {
                         dbCache[filePath] = decoded;
                     }
                 } else {
                     dbCache[filePath] = {};
+                    if (decodedKey === 'database/database.bin') {
+                        initDbHashCache(dbCache[filePath]);
+                    }
                 }
             }
 
@@ -3678,11 +4413,7 @@ app.post('/api/patch', async (req, res, next) => {
                     `[Patch] Rejected ${chatInternalOps.length} chat-internal field op(s) `
                     + `(would corrupt lazy-loaded chats): ${sample}`
                 );
-                let currentEtag;
-                try {
-                    currentEtag = computeBufferEtag(Buffer.from(encodeRisuSaveLegacy(dbCache[filePath])));
-                    dbEtag = currentEtag;
-                } catch {}
+                const currentEtag = dbEtag || rotateDbEtag();
                 res.status(409).send({
                     error: 'Patch rejected: chat-internal field ops not allowed for lazy-loaded chats',
                     code: 'CHAT_GUARD_REJECTED',
@@ -3692,14 +4423,22 @@ app.post('/api/patch', async (req, res, next) => {
                 return;
             }
 
-            const serverHash = calculateHash(dbCache[filePath]).toString(16);
+            let serverHash;
+            if (decodedKey === 'database/database.bin') {
+                serverHash = currentDbHashFromCache();
+                if (serverHash === null) {
+                    initDbHashCache(dbCache[filePath]);
+                    serverHash = currentDbHashFromCache();
+                }
+            } else {
+                serverHash = calculateHash(dbCache[filePath]).toString(16);
+            }
 
             if (expectedHash !== serverHash) {
                 console.log(`[Patch] Hash mismatch for ${decodedKey}: expected=${expectedHash}, server=${serverHash}`);
                 let currentEtag = undefined;
                 if (decodedKey === 'database/database.bin') {
-                    currentEtag = computeBufferEtag(Buffer.from(encodeRisuSaveLegacy(dbCache[filePath])));
-                    dbEtag = currentEtag;
+                    currentEtag = dbEtag || rotateDbEtag();
                 }
                 res.status(409).send({
                     error: 'Hash mismatch - data out of sync',
@@ -3708,58 +4447,240 @@ app.post('/api/patch', async (req, res, next) => {
                 return;
             }
 
-            // Apply patch to in-memory database (clone first to prevent partial mutation on failure)
-            const snapshot = JSON.parse(JSON.stringify(dbCache[filePath]));
+            // No-op database patch: the verified baseline is already the desired state.
+            // Reuse the existing ETag and avoid clone/apply/mutation/persist work entirely.
+            if (decodedKey === 'database/database.bin' && patch.length === 0 && dbEtag) {
+
+                const responsePayload = {
+                    success: true,
+                    appliedOperations: 0,
+                    etag: dbEtag,
+                };
+                const persistWarning = currentPersistWarning();
+                if (persistWarning) {
+                    responsePayload.persistWarning = persistWarning;
+                }
+                res.send(responsePayload);
+                return;
+            }
+
+            // Apply patch to an isolated staging snapshot.
+            // For database.bin, clone only touched top-level branches; fall back
+            // to the legacy full clone if the patch touches the document root.
+            let snapshot;
+            if (
+                decodedKey === 'database/database.bin'
+                && dbCache[filePath]
+                && typeof dbCache[filePath] === 'object'
+                && !Array.isArray(dbCache[filePath])
+            ) {
+                const base = dbCache[filePath];
+                const touchedRoots = new Set();
+                const pcsTouchedChildren = new Set();
+                const pcsTouchedSubchildren = new Map();
+                const pcsChildrenNeedFullClone = new Set();
+                let canBranchClone = true;
+                let pcsNeedsFullClone = false;
+
+                const decodePointerSegment = (raw) =>
+                    raw.replace(/~1/g, '/').replace(/~0/g, '~');
+
+                const addTouchedRoot = (pointer) => {
+                    if (typeof pointer !== 'string' || pointer === '') {
+                        canBranchClone = false;
+                        return;
+                    }
+                    if (!pointer.startsWith('/')) {
+                        canBranchClone = false;
+                        return;
+                    }
+
+                    const parts = pointer.slice(1).split('/');
+                    const root = decodePointerSegment(parts[0]);
+                    touchedRoots.add(root);
+
+                    if (root !== PCS_HASH_KEY) return;
+
+                    if (parts.length === 1) {
+                        pcsNeedsFullClone = true;
+                        return;
+                    }
+
+                    const child = decodePointerSegment(parts[1]);
+                    pcsTouchedChildren.add(child);
+
+                    if (parts.length === 2) {
+                        pcsChildrenNeedFullClone.add(child);
+                        return;
+                    }
+
+                    const subchild = decodePointerSegment(parts[2]);
+                    let subchildren = pcsTouchedSubchildren.get(child);
+                    if (!subchildren) {
+                        subchildren = new Set();
+                        pcsTouchedSubchildren.set(child, subchildren);
+                    }
+                    subchildren.add(subchild);
+                };
+
+                for (const op of patch) {
+                    addTouchedRoot(op.path);
+                    if (op.from !== undefined) addTouchedRoot(op.from);
+                }
+
+                if (canBranchClone) {
+                    snapshot = { ...base };
+
+                    for (const root of touchedRoots) {
+                        if (!Object.prototype.hasOwnProperty.call(base, root)) continue;
+
+                        if (
+                            root === PCS_HASH_KEY
+                            && !pcsNeedsFullClone
+                            && base[root]
+                            && typeof base[root] === 'object'
+                            && !Array.isArray(base[root])
+                        ) {
+                            const storageBase = base[root];
+                            const storageSnapshot = { ...storageBase };
+
+                            for (const child of pcsTouchedChildren) {
+                                if (!Object.prototype.hasOwnProperty.call(storageBase, child)) continue;
+
+                                const childBase = storageBase[child];
+                                const subchildren = pcsTouchedSubchildren.get(child);
+                                const canUseDepth3Clone =
+                                    !pcsChildrenNeedFullClone.has(child)
+                                    && subchildren
+                                    && subchildren.size > 0
+                                    && childBase
+                                    && typeof childBase === 'object'
+                                    && !Array.isArray(childBase);
+
+                                if (canUseDepth3Clone) {
+                                    const childSnapshot = { ...childBase };
+
+                                    for (const subchild of subchildren) {
+                                        if (
+                                            !Object.prototype.hasOwnProperty.call(
+                                                childBase,
+                                                subchild
+                                            )
+                                        ) {
+                                            continue;
+                                        }
+
+                                        const encodedSubchild =
+                                            JSON.stringify(childBase[subchild]);
+
+                                        childSnapshot[subchild] =
+                                            encodedSubchild === undefined
+                                                ? childBase[subchild]
+                                                : JSON.parse(encodedSubchild);
+                                    }
+
+                                    storageSnapshot[child] = childSnapshot;
+                                    continue;
+                                }
+
+                                const encodedChild = JSON.stringify(childBase);
+                                storageSnapshot[child] = encodedChild === undefined
+                                    ? childBase
+                                    : JSON.parse(encodedChild);
+                            }
+
+                            snapshot[root] = storageSnapshot;
+                            continue;
+                        }
+
+                        const encodedRoot = JSON.stringify(base[root]);
+                        snapshot[root] = encodedRoot === undefined
+                            ? base[root]
+                            : JSON.parse(encodedRoot);
+                    }
+                } else {
+                    snapshot = JSON.parse(JSON.stringify(base));
+                }
+            } else {
+                snapshot = JSON.parse(JSON.stringify(dbCache[filePath]));
+            }
             let result;
             try {
                 result = applyPatch(snapshot, patch, true);
             } catch (patchErr) {
                 // Invalidate corrupted cache entry to force reload on next request
                 delete dbCache[filePath];
+                if (decodedKey === 'database/database.bin') {
+                    invalidateDbHashCache();
+                }
                 throw patchErr;
             }
             dbCache[filePath] = snapshot;
+
+            if (decodedKey === 'database/database.bin') {
+                updateDbHashCacheFromPatch(snapshot, patch);
+                noteDbMutation();
+            }
 
             // Schedule save to KV (debounced) — merge full chats back for database.bin
             if (saveTimers[filePath]) {
                 clearTimeout(saveTimers[filePath]);
             }
-            saveTimers[filePath] = setTimeout(async () => {
-                try {
-                    if (decodedKey === 'database/database.bin') {
-                        await persistDbCacheWithChats(filePath, decodedKey);
-                    } else {
-                        const data = Buffer.from(encodeRisuSaveLegacy(dbCache[filePath]));
-                        try {
-                            kvSet(decodedKey, data);
-                        } catch (err) {
-                            if (err && typeof err === 'object') {
-                                try { err.attemptedSize = data.length; } catch {}
-                            }
-                            throw err;
-                        }
-                    }
-                    // Persist succeeded — clear before backup so a backup-only
-                    // failure isn't attributed to data loss.
-                    clearPersistFailure();
-                    if (decodedKey === 'database/database.bin') {
-                        try {
-                            createBackupAndRotate();
-                        } catch (backupErr) {
-                            logger.warn(`[Patch] Backup rotation failed for ${decodedKey}:`, backupErr);
-                        }
-                    }
-                } catch (error) {
-                    logger.error(`[Patch] Error saving ${decodedKey}:`, error);
-                    recordPersistFailure(error, `patch:${decodedKey}`);
-                } finally {
+            const patchSaveTimer = setTimeout(() => {
+                queueStorageOperation(async () => {
+                    // A newer write or an explicit flush may have superseded
+                    // this timer while its queued operation was waiting.
+                    if (saveTimers[filePath] !== patchSaveTimer) return;
                     delete saveTimers[filePath];
-                }
-            }, SAVE_INTERVAL);
 
-            // Update ETag after successful patch (based on stripped version)
+                    try {
+                        if (decodedKey === 'database/database.bin') {
+                            const launched = await launchBackgroundDbPersistFromCurrentState(
+                                'patch'
+                            );
+
+                            if (launched) {
+                                return;
+                            }
+
+                            // Conservative fallback when the stripped cache is
+                            // unavailable: keep the previously verified path.
+                            await persistDbCacheWithChats(filePath, decodedKey);
+                        } else {
+                            const data = Buffer.from(encodeRisuSaveLegacy(dbCache[filePath]));
+                            try {
+                                kvSet(decodedKey, data);
+                            } catch (err) {
+                                if (err && typeof err === 'object') {
+                                    try { err.attemptedSize = data.length; } catch {}
+                                }
+                                throw err;
+                            }
+                        }
+                        // Persist succeeded — clear before backup so a backup-only
+                        // failure isn't attributed to data loss.
+                        clearPersistFailure();
+                        if (decodedKey === 'database/database.bin') {
+                            try {
+                                createBackupAndRotate();
+                            } catch (backupErr) {
+                                logger.warn(`[Patch] Backup rotation failed for ${decodedKey}:`, backupErr);
+                            }
+                        }
+                    } catch (error) {
+                        logger.error(`[Patch] Error saving ${decodedKey}:`, error);
+                        recordPersistFailure(error, `patch:${decodedKey}`);
+                    }
+                }).catch(error => {
+                    logger.error(`[Patch] Queued save failed ${decodedKey}:`, error);
+                    recordPersistFailure(error, `patch-queue:${decodedKey}`);
+                });
+            }, SAVE_INTERVAL);
+            saveTimers[filePath] = patchSaveTimer;
+
+            // Successful patch created a new client-visible database revision.
             if (decodedKey === 'database/database.bin') {
-                dbEtag = computeBufferEtag(Buffer.from(encodeRisuSaveLegacy(dbCache[filePath])));
+                rotateDbEtag();
             }
 
             const responsePayload = {
@@ -4730,55 +5651,73 @@ app.post('/api/chat-content/:chaId/:chatIndex', async (req, res, next) => {
                 return res.status(400).json({ error: 'Chat data and x-chat-id required' });
             }
 
-            await ensureChatStore();
+            await ensureDbRuntimeCache();
 
             // Update fullChatStore
             if (!fullChatStore.has(chaId)) {
                 fullChatStore.set(chaId, new Map());
             }
             fullChatStore.get(chaId).set(expectedChatId, chatData);
+            noteDbMutation();
 
             // Schedule debounced persist (reuses existing timer mechanism)
             if (saveTimers[DB_HEX_KEY]) {
                 clearTimeout(saveTimers[DB_HEX_KEY]);
             }
-            saveTimers[DB_HEX_KEY] = setTimeout(async () => {
-                try {
-                    // If dbCache has stripped DB, persist with merged chats
-                    if (dbCache[DB_HEX_KEY]) {
-                        await persistDbCacheWithChats(DB_HEX_KEY, 'database/database.bin');
-                    } else {
-                        // No stripped cache — load, merge, save
-                        const raw = kvGet('database/database.bin');
-                        if (raw) {
-                            const dbObj = normalizeJSON(await decodeRisuSave(raw));
-                            const fullDb = reassembleFullDb(stripChatsFromDb(dbObj));
-                            const encoded = Buffer.from(encodeRisuSaveLegacy(fullDb));
-                            try {
-                                kvSet('database/database.bin', encoded);
-                            } catch (err) {
-                                if (err && typeof err === 'object') {
-                                    try { err.attemptedSize = encoded.length; } catch {}
+            const chatSaveTimer = setTimeout(() => {
+                queueStorageOperation(async () => {
+                    // A newer chat/patch or an explicit flush may have
+                    // superseded this timer while its queued operation waited.
+                    if (saveTimers[DB_HEX_KEY] !== chatSaveTimer) return;
+                    delete saveTimers[DB_HEX_KEY];
+
+                    try {
+                        const launched = await launchBackgroundDbPersistFromCurrentState(
+                            'chat-content'
+                        );
+
+                        if (launched) {
+                            return;
+                        }
+
+                        // No stripped cache: retain the old conservative path.
+                        if (dbCache[DB_HEX_KEY]) {
+                            await persistDbCacheWithChats(DB_HEX_KEY, 'database/database.bin');
+                        } else {
+                            // No stripped cache — load, merge, save
+                            const raw = kvGet('database/database.bin');
+                            if (raw) {
+                                const dbObj = normalizeJSON(await decodeRisuSave(raw));
+                                const fullDb = reassembleFullDb(stripChatsFromDb(dbObj));
+                                const encoded = Buffer.from(encodeRisuSaveLegacy(fullDb));
+                                try {
+                                    kvSet('database/database.bin', encoded);
+                                } catch (err) {
+                                    if (err && typeof err === 'object') {
+                                        try { err.attemptedSize = encoded.length; } catch {}
+                                    }
+                                    throw err;
                                 }
-                                throw err;
                             }
                         }
+                        // Persist succeeded — clear before backup so a backup-only
+                        // failure isn't attributed to data loss.
+                        clearPersistFailure();
+                        try {
+                            createBackupAndRotate();
+                        } catch (backupErr) {
+                            logger.warn('[ChatContent] Backup rotation failed:', backupErr);
+                        }
+                    } catch (error) {
+                        logger.error('[ChatContent] Error persisting chat:', error);
+                        recordPersistFailure(error, 'chat-content');
                     }
-                    // Persist succeeded — clear before backup so a backup-only
-                    // failure isn't attributed to data loss.
-                    clearPersistFailure();
-                    try {
-                        createBackupAndRotate();
-                    } catch (backupErr) {
-                        logger.warn('[ChatContent] Backup rotation failed:', backupErr);
-                    }
-                } catch (error) {
-                    logger.error('[ChatContent] Error persisting chat:', error);
-                    recordPersistFailure(error, 'chat-content');
-                } finally {
-                    delete saveTimers[DB_HEX_KEY];
-                }
+                }).catch(error => {
+                    logger.error('[ChatContent] Queued save failed:', error);
+                    recordPersistFailure(error, 'chat-content-queue');
+                });
             }, SAVE_INTERVAL);
+            saveTimers[DB_HEX_KEY] = chatSaveTimer;
 
             res.json({ success: true });
         });
@@ -5499,7 +6438,7 @@ app.post('/api/db/optimize', async (req, res, next) => {
         }
 
         const result = await queueStorageOperation(async () => {
-            await flushPendingDb();
+            await flushPendingDbUnlocked();
             const t0 = Date.now();
             // Reclaim chunks orphaned by edits/snapshot rotation before VACUUM, so
             // their pages get compacted in the same pass. Serialized with saves by
@@ -5535,7 +6474,7 @@ app.post('/api/db/wal-checkpoint', async (req, res, next) => {
         const preWalSize = statSafe(walFilePath)?.size ?? 0;
 
         const result = await queueStorageOperation(async () => {
-            await flushPendingDb();
+            await flushPendingDbUnlocked();
             const t0 = Date.now();
             checkpointWal('TRUNCATE');
             const elapsed = Date.now() - t0;
@@ -5659,7 +6598,7 @@ app.post('/api/db/snapshots/restore', async (req, res, next) => {
             // Drain any pending debounced persist first — same pattern as
             // /api/db/optimize. Without this, an in-flight save could land
             // after kvCopyValue and overwrite the restored snapshot.
-            await flushPendingDb();
+            await flushPendingDbUnlocked();
             kvCopyValue(key, DB_BLOB_KEY);
             invalidateDbCache();
             // Snapshot may pre-date the remote-block migration. Clear the marker
@@ -5681,7 +6620,7 @@ app.post('/api/db/snapshots/restore', async (req, res, next) => {
                     // Migration may have rewritten database.bin — etag must
                     // reflect the post-migration bytes the next /api/read sends.
                     const finalRaw = kvGet(DB_BLOB_KEY);
-                    if (finalRaw) dbEtag = computeBufferEtag(Buffer.from(finalRaw));
+                    if (finalRaw) rotateDbEtag();
                 }
             } catch (e) {
                 logger.warn('[Snapshot restore] post-restore decode failed:', e?.message || e);
@@ -6386,6 +7325,14 @@ async function startServer() {
     try {
         await migrateInlaysToFilesystem();
         await migrateRemoteBlocksIfNeeded();
+
+        const prewarmStartedAt = Date.now();
+        logger.info('[Server] Prewarming database runtime cache...');
+        await ensureDbRuntimeCache();
+        logger.info(
+            `[Server] Database runtime cache ready in ${Date.now() - prewarmStartedAt}ms`
+        );
+
         const port = process.env.PORT || 6001;
         const httpsOptions = await getHttpsOptions();
         let server;

@@ -77,6 +77,10 @@ export interface SettingsBackupEstimate {
 export class NodeStorage{
     private static readonly BULK_WRITE_CLIENT_BATCH = 20
 
+    // Avoid repeatedly surfacing the same oversized full-write failure while
+    // autosave keeps retrying in the background.
+    private static lastOversizeSaveWarningAt = 0
+
     // Cross-device single-writer lock identity. Persisted in sessionStorage so
     // a reload or an OS tab restore of the SAME tab keeps the same identity —
     // a phone tab resurrected in the background must not look like a new
@@ -253,7 +257,49 @@ export class NodeStorage{
             throw new ConflictError(data.error, data.currentEtag)
         }
         if(da.status < 200 || da.status >= 300){
-            throw "setItem Error"
+            // Preserve the server's actual failure reason instead of collapsing
+            // every write error into the opaque "setItem Error".
+            let serverMessage = `HTTP ${da.status}${da.statusText ? ` ${da.statusText}` : ''}`
+
+            try {
+                const body = await da.clone().json()
+                if (typeof body?.error === 'string' && body.error.trim()) {
+                    serverMessage = body.error.trim()
+                }
+            } catch {
+                try {
+                    const text = (await da.text()).trim()
+                    if (text && text.length <= 500 && !text.startsWith('<')) {
+                        serverMessage = text
+                    }
+                } catch {
+                    // Keep the HTTP fallback above.
+                }
+            }
+
+            if (da.status === 413 && key === 'database/database.bin') {
+                const attemptedGiB = value.byteLength / 1024 / 1024 / 1024
+                const attemptedLabel = `${attemptedGiB.toFixed(2)}GB`
+                const message =
+                    `HTTP 413 — database save request exceeded the server's 2GB request limit. ${serverMessage}`
+
+                const now = Date.now()
+                if (now - NodeStorage.lastOversizeSaveWarningAt > 5 * 60 * 1000) {
+                    NodeStorage.lastOversizeSaveWarningAt = now
+
+                    notifyError(
+                        `${language.errors.persistFailureTitle} (${language.errors.persistFailureAttemptedSize} ${attemptedLabel})`,
+                        {
+                            description: message,
+                            source: 'save-request-too-large',
+                        }
+                    )
+                }
+
+                throw new Error(message)
+            }
+
+            throw new Error(`setItem failed (${da.status}): ${serverMessage}`)
         }
         const data = await da.json()
         if(data.error){
@@ -715,15 +761,48 @@ export class NodeStorage{
 
     async saveChatContent(chaId: string, chatIndex: number, chatId: string, chat: any): Promise<void> {
         const encoded = encodeRisuSaveLegacy(chat)
-        const da = await this.authFetch(`/api/chat-content/${encodeURIComponent(chaId)}/${chatIndex}`, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/octet-stream',
-                'x-chat-id': chatId,
-            },
-            body: encoded,
-        })
-        if (da.status < 200 || da.status >= 300) throw new Error(`saveChatContent error: ${da.status}`)
+
+        // A brief Android/LAN route drop can tear down the localhost SSH
+        // tunnel while the PocketRisu server itself remains healthy.
+        // Retry ONLY transport-level failures here. HTTP failures are returned
+        // immediately so auth/session/storage errors are never hidden.
+        const networkRetryDelays = [1000, 2000, 4000, 8000, 16000]
+
+        for (let attempt = 0; ; attempt++) {
+            try {
+                const da = await this.authFetch(`/api/chat-content/${encodeURIComponent(chaId)}/${chatIndex}`, {
+                    method: 'POST',
+                    headers: {
+                        'content-type': 'application/octet-stream',
+                        'x-chat-id': chatId,
+                    },
+                    body: encoded,
+                })
+
+                if (da.status < 200 || da.status >= 300) {
+                    throw new Error(`saveChatContent error: ${da.status}`)
+                }
+
+                return
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                const isNetworkFailure =
+                    error instanceof TypeError ||
+                    /Failed to fetch|NetworkError when attempting to fetch resource|fetch failed|Load failed/i.test(message)
+
+                if (!isNetworkFailure || attempt >= networkRetryDelays.length) {
+                    throw error
+                }
+
+                const delay = networkRetryDelays[attempt]
+                console.warn(
+                    `[NodeStorage] saveChatContent network failure; retrying in ${delay}ms (${attempt + 1}/${networkRetryDelays.length})`,
+                    error,
+                )
+
+                await new Promise<void>(resolve => setTimeout(resolve, delay))
+            }
+        }
     }
 
     // ── Save-folder migration ─────────────────────────────────────────────────

@@ -6,7 +6,8 @@
     import { TriangleAlert } from '@lucide/svelte';
 
     import { DBState, hotReloading } from "src/ts/stores.svelte";
-    import { checkPluginUpdate, createBlankPlugin, importPlugin, loadPlugins, updatePlugin } from "src/ts/plugins/plugins.svelte";
+    import { createBlankPlugin, importPlugin, loadPlugins } from "src/ts/plugins/plugins.svelte";
+    import { checkPluginUpdate, updatePlugin } from "src/ts/plugins/pluginUpdater";
     import { requestImmediateSave } from "src/ts/globalApi.svelte";
     import { resetPluginPermission } from "src/ts/plugins/apiV3/v3.svelte";
     import TextInput from "src/lib/UI/GUI/TextInput.svelte";

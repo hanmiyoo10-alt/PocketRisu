@@ -91,6 +91,218 @@ import { isMobile } from 'src/ts/platform'
     let draftChatId = $derived(currentChatSlot?.id ?? '')
     let draftLoading = $state(false)
 
+    // ─── Per-chat scroll position ───────────────────────────────────────────
+    // Store an anchor message + its visual offset instead of raw scrollTop.
+    // This is more stable when message heights change after images/layout settle.
+    type ChatScrollSnapshot = {
+        messageIndex: number
+        offsetTop: number
+    }
+
+    const CHAT_SCROLL_STORAGE_PREFIX = 'pocketrisu:chat-scroll:v1:'
+    let chatScrollContainer: HTMLElement = $state()
+    let chatScrollSaveTimer: ReturnType<typeof setTimeout> | null = null
+    let restoringChatScroll = false
+
+    let chatScrollStorageKey = $derived(
+        draftChaId && draftChatId
+            ? `${CHAT_SCROLL_STORAGE_PREFIX}${draftChaId}:${draftChatId}`
+            : ''
+    )
+
+    function readChatScrollSnapshot(key: string): ChatScrollSnapshot | null {
+        if (!key) return null
+
+        try {
+            const raw = localStorage.getItem(key)
+            if (!raw) return null
+
+            const parsed = JSON.parse(raw) as Partial<ChatScrollSnapshot>
+
+            if (
+                typeof parsed.messageIndex !== 'number' ||
+                !Number.isInteger(parsed.messageIndex) ||
+                parsed.messageIndex < 0 ||
+                typeof parsed.offsetTop !== 'number' ||
+                !Number.isFinite(parsed.offsetTop)
+            ) {
+                return null
+            }
+
+            return {
+                messageIndex: parsed.messageIndex,
+                offsetTop: parsed.offsetTop,
+            }
+        } catch {
+            return null
+        }
+    }
+
+    function writeChatScrollSnapshot(
+        key: string,
+        container: HTMLElement | undefined = chatScrollContainer
+    ) {
+        if (!key || !container || restoringChatScroll) return
+
+        const messages = getLoadedMessages(container)
+        if (messages.length === 0) return
+
+        const containerRect = container.getBoundingClientRect()
+        const visible = messages.find(({ el }) =>
+            el.getBoundingClientRect().bottom > containerRect.top + 1
+        ) ?? messages.at(-1)
+
+        if (!visible) return
+
+        const messageRect = visible.el.getBoundingClientRect()
+        const snapshot: ChatScrollSnapshot = {
+            messageIndex: visible.idx,
+            offsetTop: messageRect.top - containerRect.top,
+        }
+
+        try {
+            localStorage.setItem(key, JSON.stringify(snapshot))
+        } catch {
+            // Scroll restoration is best-effort; storage failure must not affect chat.
+        }
+    }
+
+    function scheduleChatScrollSave(key: string, container: HTMLElement) {
+        if (!key || restoringChatScroll) return
+
+        if (chatScrollSaveTimer) clearTimeout(chatScrollSaveTimer)
+
+        chatScrollSaveTimer = setTimeout(() => {
+            chatScrollSaveTimer = null
+            writeChatScrollSnapshot(key, container)
+        }, 120)
+    }
+
+    $effect(() => {
+        const key = chatScrollStorageKey
+        const ready = currentChatReady
+
+        if (!key || !ready) return
+
+        let active = true
+        const snapshot = readChatScrollSnapshot(key)
+
+        if (snapshot) {
+            restoringChatScroll = true
+
+            ;(async () => {
+                try {
+                    const messageCount = untrack(() => currentChat.length)
+                    const neededLoadPages = Math.max(
+                        0,
+                        messageCount - snapshot.messageIndex + 5
+                    )
+
+                    if (loadPages < neededLoadPages) {
+                        loadPages = neededLoadPages
+                    }
+
+                    await tick()
+                    if (!active) return
+
+                    const restoreOnce = () => {
+                        const container = chatScrollContainer
+                        if (!container) return false
+
+                        const element = container.querySelector(
+                            `[data-chat-index="${snapshot.messageIndex}"]`
+                        ) as HTMLElement | null
+
+                        if (!element) return false
+
+                        const containerRect = container.getBoundingClientRect()
+                        const elementRect = element.getBoundingClientRect()
+
+                        container.scrollTop +=
+                            elementRect.top -
+                            containerRect.top -
+                            snapshot.offsetTop
+
+                        return true
+                    }
+
+                    // On a full reload the chat data can be ready before Chats has
+                    // finished mounting the requested message range. Wait for the
+                    // anchor DOM just like scrollToMessage() already does.
+                    let restored = false
+                    for (let i = 0; i < 50; i++) {
+                        if (!active) return
+
+                        if (restoreOnce()) {
+                            restored = true
+                            break
+                        }
+
+                        await new Promise<void>((resolve) =>
+                            setTimeout(resolve, 100)
+                        )
+                    }
+
+                    if (!restored || !active) return
+
+                    // Correct once after the immediate layout pass.
+                    await new Promise<void>((resolve) =>
+                        requestAnimationFrame(() => resolve())
+                    )
+
+                    if (!active) return
+                    restoreOnce()
+
+                    // Images can shift message heights after the first render.
+                    const container = chatScrollContainer
+                    const pendingImages = container
+                        ? Array.from(container.querySelectorAll('img'))
+                            .filter((img) => !img.complete)
+                        : []
+
+                    if (pendingImages.length > 0) {
+                        await Promise.race([
+                            Promise.all(
+                                pendingImages.map(
+                                    (img) =>
+                                        new Promise<void>((resolve) => {
+                                            const done = () => resolve()
+                                            img.addEventListener('load', done, { once: true })
+                                            img.addEventListener('error', done, { once: true })
+                                        })
+                                )
+                            ),
+                            new Promise<void>((resolve) =>
+                                setTimeout(resolve, 1500)
+                            ),
+                        ])
+
+                        if (active) restoreOnce()
+                    }
+                } finally {
+                    if (active) restoringChatScroll = false
+                }
+            })()
+        }
+
+        // Runs before the selected chat changes, while the old chat DOM is
+        // still available. This captures the exact final position being left.
+        return () => {
+            active = false
+
+            if (chatScrollSaveTimer) {
+                clearTimeout(chatScrollSaveTimer)
+                chatScrollSaveTimer = null
+            }
+
+            if (!restoringChatScroll) {
+                writeChatScrollSnapshot(key, chatScrollContainer)
+            }
+
+            restoringChatScroll = false
+        }
+    })
+
     function persistDraftNow() {
         flushChatDraft(draftChaId, draftChatId, { m: messageInput, t: messageInputTranslate })
     }
@@ -142,8 +354,14 @@ import { isMobile } from 'src/ts/platform'
     // Best-effort persist on tab hide / unload (refresh, app switch): the
     // unmount cleanup above does not fire on a hard page teardown.
     $effect(() => {
-        const onHide = () => { if (document.visibilityState === 'hidden') persistDraftNow() }
-        const onPageHide = () => persistDraftNow()
+        const onHide = () => {
+            if (document.visibilityState === 'hidden') {
+                persistDraftNow()
+            }
+        }
+        const onPageHide = () => {
+            persistDraftNow()
+        }
         document.addEventListener('visibilitychange', onHide)
         window.addEventListener('pagehide', onPageHide)
         return () => {
@@ -1265,10 +1483,12 @@ import { isMobile } from 'src/ts/platform'
              resizes, and the sticky composer inside this col-reverse scroller gets misanchored
              (bar floats up with a gap below). PWA/standalone has no URL bar, hence unaffected. -->
         <div class="h-full w-full flex flex-col-reverse overflow-y-auto overscroll-y-contain relative default-chat-screen"
+            bind:this={chatScrollContainer}
             class:nodeonly-standard={DBState.db.theme === ''}
             class:no-chat-width-wide={DBState.db.theme === '' && DBState.db.nodeOnlyStandardChatWidth === 'wide'}
             class:no-chat-width-full={DBState.db.theme === '' && DBState.db.nodeOnlyStandardChatWidth === 'full'}
             onscroll={(e) => {
+            scheduleChatScrollSave(chatScrollStorageKey, e.currentTarget as HTMLElement)
             if (DBState.db.nodeOnlyScrollButtonType !== 'off') {
                 bumpScrollNav()
             }

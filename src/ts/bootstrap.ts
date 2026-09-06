@@ -34,6 +34,31 @@ import { initModelJobRecovery } from "./process/request/jobRecovery";
 import { convertStubsToPlaceholders } from "./storage/chatStorage";
 import { isChatStub, purgeUnsupportedGroupChats } from "./storage/database.svelte";
 
+async function waitForLocalServer(maxWaitMs = 90_000) {
+    const deadline = Date.now() + maxWaitMs
+
+    while (Date.now() < deadline) {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 1_500)
+
+        try {
+            await fetch('/api/test_auth', {
+                cache: 'no-store',
+                signal: controller.signal
+            })
+            return
+        } catch {
+            // Android may restore Firefox before Termux:Boot starts PocketRisu.
+        } finally {
+            clearTimeout(timer)
+        }
+
+        await new Promise<void>((resolve) => setTimeout(resolve, 1_000))
+    }
+
+    throw new Error('Local PocketRisu server did not become ready within 90 seconds')
+}
+
 /**
  * Loads the application data.
  */
@@ -44,6 +69,11 @@ export async function loadData() {
             applyEarlyLanguage()
             let createdFreshDatabase = false
             {
+                if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+                    LoadingStatusState.text = "Waiting for Local Server..."
+                    await waitForLocalServer()
+                }
+
                 await forageStorage.Init()
 
                 LoadingStatusState.text = "Loading Local Save File..."

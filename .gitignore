@@ -58,3 +58,14 @@ dist.zip
 # Due to Cargo.lock makes the project build fail, we ignore it
 Cargo.lock
 test/fixtures/
+
+# PocketRisu Termux local/runtime artifacts
+/.local_usage_bridge_token
+/local_usage_snapshot*.json
+/bridge/backup/
+/bridge/run/
+/bridge/update-ready/
+/local-patches/
+*.bak-*
+/pocketrisu@*
+/svelte-check

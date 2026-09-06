@@ -62,14 +62,62 @@ function resolveVolume(volume?: number): number {
     return Math.min(1, Math.max(0, raw / 100))
 }
 
+let notificationAudio: HTMLAudioElement | null = null
+let notificationPlayId = 0
+
+function releaseNotificationAudio(audio: HTMLAudioElement) {
+    audio.onended = null
+    audio.onerror = null
+
+    try {
+        audio.pause()
+    } catch {}
+
+    try {
+        audio.removeAttribute('src')
+        audio.load()
+    } catch {}
+
+    if (notificationAudio === audio) {
+        notificationAudio = null
+    }
+}
+
 /** Fire-and-forget notification sound (message/translation complete). */
 export async function playNotificationSound(value: string | undefined, volume?: number) {
+    const playId = ++notificationPlayId
+
     try {
-        const audio = new Audio(await resolveSoundUrl(value))
+        const url = await resolveSoundUrl(value)
+
+        // A newer completion sound superseded this request while URL resolution
+        // was still in flight.
+        if (playId !== notificationPlayId) {
+            return
+        }
+
+        // Keep the automatic completion channel bounded to one live element.
+        if (notificationAudio) {
+            releaseNotificationAudio(notificationAudio)
+        }
+
+        const audio = new Audio(url)
         audio.volume = resolveVolume(volume)
-        audio.play().catch(() => {})
+        notificationAudio = audio
+
+        const cleanup = () => {
+            releaseNotificationAudio(audio)
+        }
+
+        audio.onended = cleanup
+        audio.onerror = cleanup
+
+        audio.play().catch(cleanup)
     } catch {
-        // ignore playback failures (autoplay policy, missing asset, etc.)
+        // Release any element created by this current playback attempt.
+        if (playId === notificationPlayId && notificationAudio) {
+            releaseNotificationAudio(notificationAudio)
+        }
     }
 }
 

@@ -1,0 +1,118 @@
+#!/data/data/com.termux/files/usr/bin/sh
+
+PREFIX="/data/data/com.termux/files/usr"
+export PATH="$PREFIX/bin:$PATH"
+
+APP_DIR="$HOME/PocketRisu"
+
+SERVER_LOG="$HOME/pocketrisu-boot.log"
+TRACE_LOG="$HOME/pocketrisu-start-trace.log"
+
+MANAGER_SERVICE="$PREFIX/var/service/local-usage-runtime-manager"
+START_SERVICES="$PREFIX/etc/profile.d/start-services.sh"
+
+NODE="$PREFIX/bin/node"
+CURL="$PREFIX/bin/curl"
+PGREP="$PREFIX/bin/pgrep"
+SV="$PREFIX/bin/sv"
+WAKE_LOCK="$PREFIX/bin/termux-wake-lock"
+WAKE_UNLOCK="$PREFIX/bin/termux-wake-unlock"
+
+(
+    echo "===== Local stack boot $(date) =====" >> "$TRACE_LOG"
+    echo "worker_pid=$$" >> "$TRACE_LOG"
+
+    "$WAKE_LOCK" >/dev/null 2>&1 || true
+
+    cleanup() {
+        "$WAKE_UNLOCK" >/dev/null 2>&1 || true
+        echo "wake_lock=released $(date)" >> "$TRACE_LOG"
+    }
+    trap cleanup EXIT
+
+    # 1. Start Termux services / Local Usage Runtime
+    if [ -f "$START_SERVICES" ]; then
+        . "$START_SERVICES"
+        echo "termux_services=initialized $(date)" >> "$TRACE_LOG"
+    else
+        echo "termux_services=profile-missing $(date)" >> "$TRACE_LOG"
+    fi
+
+    "$SV" up "$MANAGER_SERVICE" >/dev/null 2>&1 || true
+
+    manager_check=1
+    manager_ready=0
+
+    while [ "$manager_check" -le 10 ]; do
+        if "$SV" status "$MANAGER_SERVICE" 2>/dev/null | grep -q '^run:'; then
+            manager_ready=1
+            echo "local_usage=ready $(date)" >> "$TRACE_LOG"
+            break
+        fi
+
+        sleep 1
+        manager_check=$((manager_check + 1))
+    done
+
+    if [ "$manager_ready" -ne 1 ]; then
+        echo "local_usage=not-ready $(date)" >> "$TRACE_LOG"
+    fi
+
+    # Give Android/Termux a little time to settle after boot.
+    sleep 8
+
+    # 2. Start PocketRisu and wait for HTTP readiness
+    attempt=1
+
+    while [ "$attempt" -le 4 ]; do
+        echo "pocketrisu_attempt=$attempt $(date)" >> "$TRACE_LOG"
+
+        if "$CURL" -fsS --max-time 3 \
+            http://127.0.0.1:6001/ >/dev/null 2>&1; then
+            echo "pocketrisu=already-running $(date)" >> "$TRACE_LOG"
+            exit 0
+        fi
+
+        if ! "$PGREP" -f '[n]ode server/node/server\.cjs' >/dev/null 2>&1; then
+            if ! cd "$APP_DIR"; then
+                echo "pocketrisu=cd-failed $(date)" >> "$TRACE_LOG"
+                attempt=$((attempt + 1))
+                sleep 5
+                continue
+            fi
+
+            nohup "$NODE" server/node/server.cjs \
+                >> "$SERVER_LOG" 2>&1 &
+
+            echo "pocketrisu_started_pid=$! $(date)" >> "$TRACE_LOG"
+        else
+            echo "pocketrisu=process-present-waiting $(date)" >> "$TRACE_LOG"
+        fi
+
+        check=1
+
+        while [ "$check" -le 10 ]; do
+            if "$CURL" -fsS --max-time 3 \
+                http://127.0.0.1:6001/ >/dev/null 2>&1; then
+                echo "pocketrisu=ready attempt=$attempt $(date)" >> "$TRACE_LOG"
+                exit 0
+            fi
+
+            sleep 2
+            check=$((check + 1))
+        done
+
+        if "$PGREP" -f '[n]ode server/node/server\.cjs' >/dev/null 2>&1; then
+            echo "pocketrisu=http-timeout-process-alive attempt=$attempt $(date)" >> "$TRACE_LOG"
+        else
+            echo "pocketrisu=process-died attempt=$attempt $(date)" >> "$TRACE_LOG"
+        fi
+
+        attempt=$((attempt + 1))
+        sleep 5
+    done
+
+    echo "pocketrisu=failed-after-retries $(date)" >> "$TRACE_LOG"
+) >/dev/null 2>&1 &
+
+exit 0

@@ -66,6 +66,8 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     usedContinueTokens?:number,
     preview?:boolean
     previewPrompt?:boolean
+    requestStartedAt?:number
+    responseModelLabel?:string
 } = {}):Promise<boolean> {
 
     chatProcessStage.set(0)
@@ -1449,6 +1451,28 @@ export async function sendChat(chatProcessIndex = -1,arg:{
         return true
     }
 
+    // Native request-start notification.
+    // This timestamp deliberately starts AFTER prompt preprocessing so the
+    // displayed duration measures the actual request/generation phase.
+    const isFirstModelRequest = arg.requestStartedAt === undefined
+    const requestStartedAt = arg.requestStartedAt ?? performance.now()
+    let responseModelLabel = arg.responseModelLabel ?? getGenerationModelString()
+    const shouldNotifyNative = !arg.preview && !arg.previewPrompt
+
+    if(isFirstModelRequest && shouldNotifyNative){
+        void fetch('/api/termux-notify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stage: 'start',
+                model: responseModelLabel,
+                character: currentChar?.name ?? ''
+            })
+        }).catch(() => {})
+    }
+
     const req = await requestChatData({
         formated: formated,
         biasString: biases,
@@ -1468,6 +1492,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     console.log(req)
     if(req.model){
         generationInfo.model = getGenerationModelString(req.model)
+        responseModelLabel = generationInfo.model
         console.log(generationInfo.model, req.model)
     }
 
@@ -1583,11 +1608,40 @@ export async function sendChat(chatProcessIndex = -1,arg:{
             void reader.cancel().catch(() => {})
         }
         abortSignal.addEventListener('abort', abortReader, { once: true })
+        const streamReadTimeoutMs = (DBState.db.localNetworkTimeoutSec ?? 600) * 1000
+        const readStreamChunk = async (): Promise<ReadableStreamReadResult<{ [key: string]: string }>> => {
+            if(!Number.isFinite(streamReadTimeoutMs) || streamReadTimeoutMs <= 0){
+                return await reader.read()
+            }
+
+            let timeoutId: ReturnType<typeof setTimeout> | null = null
+            try {
+                return await Promise.race([
+                    reader.read(),
+                    new Promise<never>((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            const error = new Error(
+                                `Streaming response stalled for ${Math.ceil(streamReadTimeoutMs / 1000)} seconds`
+                            )
+                            error.name = 'TimeoutError'
+                            reject(error)
+                            void reader.cancel().catch(() => {})
+                        }, Math.max(1, Math.floor(streamReadTimeoutMs)))
+                    }),
+                ])
+            }
+            finally {
+                if(timeoutId !== null){
+                    clearTimeout(timeoutId)
+                }
+            }
+        }
+
         try {
             while(streamAborted === false){
                 let readed: ReadableStreamReadResult<{ [key: string]: string }>
                 try {
-                    readed = await reader.read()
+                    readed = await readStreamChunk()
                 }
                 catch(error){
                     if(abortSignal.aborted || streamAborted){
@@ -1768,6 +1822,8 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     if(needsAutoContinue){
         endGeneration(genKey, { keepPendingAbort: true })
         return await sendChat(chatProcessIndex, {
+            requestStartedAt,
+            responseModelLabel,
             chatAdditonalTokens: arg.chatAdditonalTokens,
             continue: true,
             signal: abortSignal,
@@ -1812,24 +1868,36 @@ export async function sendChat(chatProcessIndex = -1,arg:{
         
         endGeneration(genKey, { keepPendingAbort: true })
         return await sendChat(chatProcessIndex, {
+            requestStartedAt,
+            responseModelLabel,
             signal: abortSignal
         })
     }
 
-    if(DBState.db.notification){
-        try {
-            const permission = await Notification.requestPermission()
-            if(permission === 'granted'){
-                const noti = new Notification('Risuai', {
-                    body: result
+    // Native Android completion notification through Termux.
+    // Uses requestStartedAt rather than sendChat entry time, so long prompt
+    // preprocessing is not counted as provider/generation latency.
+    try {
+        const elapsedMs = performance.now() - requestStartedAt
+        const shouldPlayNativeSound = document.visibilityState !== 'visible'
+
+        if(shouldNotifyNative){
+            void fetch('/api/termux-notify', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    stage: 'done',
+                    elapsedMs,
+                    sound: shouldPlayNativeSound,
+                    model: responseModelLabel,
+                    character: currentChar?.name ?? ''
                 })
-                noti.onclick = () => {
-                    window.focus()
-                }
-            }
-        } catch (error) {
-            
+            }).catch(() => {})
         }
+    } catch (error) {
+
     }
 
     if(req.special){

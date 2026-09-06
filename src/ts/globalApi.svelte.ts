@@ -378,36 +378,27 @@ export async function saveDb() {
             }
             if (!gotChannel) {
                 gotChannel = true
-                alertNormalWait(language.activeTabChange).then(() => {
-                    location.reload()
-                })
+                void alertNormalWait(language.activeTabChange)
             }
         }
     }
     // Cross-device single-writer lock: mirrors BroadcastChannel behavior
     // across devices via server-side session check (423 → deactivate).
-    // With reload-on-return below, a write actually reaching 423 means TRUE
-    // simultaneous use of two devices — rare, and the attempted change cannot
-    // be saved — so it stays an explicit blocking modal, never an automatic
-    // reload that would eat the user's action without a word.
+    // A 423 marks this page conflicted. Keep it blocked from further saves
+    // and surface the conflict without automatically reloading the page.
     window.addEventListener('risu-session-deactivated', () => {
         if (!gotChannel) {
             gotChannel = true
-            alertNormalWait(language.activeTabChange).then(() => {
-                location.reload()
-            })
+            void alertNormalWait(language.activeTabChange)
         }
     })
 
-    // Reload-on-return: while this tab was hidden, another device may have
-    // taken the writer lock and changed data. Check the moment the user comes
-    // BACK — right then nothing is in progress, so a refresh costs nothing —
-    // instead of at the next write, where a 423 would eat the very change
-    // being saved. Only 'stale' reloads (the other device actually wrote);
-    // 'fresh' means our copy is still current and the next user action simply
-    // takes the lock back with no reload at all.
+    // Foreground-return stale check: if another writer changed data while this
+    // page was away, block this stale page from further saves and warn the user.
+    // Full-page refresh remains manual-only.
     let lastLockReturnCheck = 0
     const checkWriterLockOnReturn = () => {
+        if (gotChannel) return
         const nowMs = Date.now()
         if (nowMs - lastLockReturnCheck < 5000) return
         lastLockReturnCheck = nowMs
@@ -418,23 +409,14 @@ export async function saveDb() {
             if (get(doingChat)) return // never yank a running generation
             const state = await forageStorage.getWriterLockState()
             if (state !== 'stale') return
-            try { sessionStorage.setItem('risu-session-handoff-reload', '1') } catch { /* toast is best-effort */ }
-            location.reload()
+            gotChannel = true
+            void alertNormalWait(language.activeTabChange)
         })().catch(() => { /* status check failed — do nothing, write path 423 still guards */ })
     }
     window.addEventListener('focus', checkWriterLockOnReturn)
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') checkWriterLockOnReturn()
     })
-
-    // Post-handoff notice from a reload-on-return in the previous page life.
-    // Delayed so the toast container is mounted before it fires.
-    try {
-        if (sessionStorage.getItem('risu-session-handoff-reload')) {
-            sessionStorage.removeItem('risu-session-handoff-reload')
-            setTimeout(() => notifyInfo(language.sessionHandoffReload), 1500)
-        }
-    } catch { /* storage unavailable — skip the notice */ }
 
     const changeTracker: toSaveType = {
         character: [],
@@ -482,15 +464,10 @@ export async function saveDb() {
     }
 
     async function flushServerDbKeepalive() {
-        try {
-            fetch('/api/db/flush', {
-                method: 'POST',
-                keepalive: true,
-                credentials: 'same-origin'
-            }).catch(() => {})
-        } catch {
-            // ignore best-effort flush failures
-        }
+        // Do not force the server's pending DB persist on tab/app hide.
+        // triggerSave() still sends current changes, and the server's normal
+        // debounce persists them shortly afterwards. Forcing /api/db/flush
+        // here can synchronously persist the large DB blob and stall Node.
     }
 
     $effect.root(() => {
