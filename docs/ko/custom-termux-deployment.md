@@ -281,6 +281,11 @@ runtime state/cache는 저장소 밖의 다음 계열 경로를 사용한다.
 - non-fast-forward 거부 시 candidate build/service stop까지 진행하지 않음
 - sandbox lock / pending target 잔여 없음
 - sandbox 테스트 후 실제 서버폰 HEAD, PID, health 변경 없음
+- committed updater의 update 없는 `--apply` no-op: PASS
+- no-op `--apply`에서 candidate build / dependency install / service stop /
+  fast-forward 경로에 진입하지 않음
+- no-op `--apply` 전후 서비스 PID 동일 및 `/api/health` ready
+- no-op 완료 후 updater lock / pending target state 잔여 없음
 
 아직 실제 새 target에 대한 live `--apply` 성공/rollback 테스트는 수행하지 않았다.
 첫 실제 update에서는 별도 검증된 fork commit을 대상으로 단계적으로 확인한다.
