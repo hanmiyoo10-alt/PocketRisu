@@ -7175,7 +7175,8 @@ function decodeRemoteMetaLastUsed(raw) {
 }
 
 async function computeAssetSweep({ includeAssets, assetGraceMs = 0, includeRemotes = false, checkpointLabel = 'AssetSweep' } = {}) {
-    await flushPendingDb();
+    // Caller already holds storageOperationQueue; re-queueing here deadlocks.
+    await flushPendingDbUnlocked();
     const raw = kvGet(DB_BLOB_KEY);
     if (!raw) return { error: 'No database blob' };
     const dbObj = await decodeRisuSave(raw);

@@ -444,3 +444,19 @@ v1.11.2 live 운영 중 Provider Manager 진입 시
 현재 v1.12.0은 이 문서 시점에서 아직 live 배포 완료 상태가 아니다.
 검증된 merge candidate를 commit/push한 뒤 Git 배포 updater의
 실제 새-target `--apply` 경로로 별도 배포 검증한다.
+
+## Auto-sweep queue deadlock hotfix
+
+`/api/db/assets/auto-sweep`와 purge-orphans는 이미
+`storageOperationQueue` 안에서 `computeAssetSweep()`를 호출한다.
+
+기존 `computeAssetSweep()`가 다시 `flushPendingDb()`를 호출해
+같은 queue를 재진입하며 자기 대기 deadlock이 발생했다.
+이 상태에서는 SIGTERM shutdown의 `flushPendingDb()`도 뒤에서 대기해
+서비스가 종료되지 않을 수 있다.
+
+queue-held 호출 계약에 맞게 `flushPendingDbUnlocked()`로 변경했다.
+
+검증:
+- `node --check server/node/server.cjs`: PASS
+- `server/node/autoSweep.test.ts`: 7/7 PASS
