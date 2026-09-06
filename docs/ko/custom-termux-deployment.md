@@ -289,3 +289,34 @@ runtime state/cache는 저장소 밖의 다음 계열 경로를 사용한다.
 
 아직 실제 새 target에 대한 live `--apply` 성공/rollback 테스트는 수행하지 않았다.
 첫 실제 update에서는 별도 검증된 fork commit을 대상으로 단계적으로 확인한다.
+
+## 배포 브랜치 보호 정책
+
+fork의 Git 배포 기준 브랜치인
+`deploy/termux-pocketrisu`에는 GitHub branch protection을 적용한다.
+
+현재 보호 계약은 다음과 같다.
+
+- 관리자에게도 branch protection을 적용한다.
+- force push를 허용하지 않는다.
+- branch 삭제를 허용하지 않는다.
+- required status checks는 강제하지 않는다.
+- pull request review는 강제하지 않는다.
+- 일반 fast-forward push는 계속 허용한다.
+
+이 정책의 목적은 Git-safe updater가 신뢰하는 배포 브랜치의 이력이
+강제 push로 재작성되거나 branch 자체가 실수로 삭제되는 것을 막으면서,
+검증된 배포 commit과 문서 commit의 일반 push 흐름은 유지하는 것이다.
+
+GitHub API로 적용 후 다음 값을 확인했다.
+
+- `enforce_admins=true`
+- `allow_force_pushes=false`
+- `allow_deletions=false`
+- `required_status_checks=null`
+- `required_pull_request_reviews=null`
+
+적용 후 `git push --dry-run`으로 일반 push 경로가 유지되는 것도 확인했다.
+
+GitHub 화면에서 보이는 default `main` branch의 보호 경고는
+이 별도 배포 브랜치 보호 정책과는 구분한다.
