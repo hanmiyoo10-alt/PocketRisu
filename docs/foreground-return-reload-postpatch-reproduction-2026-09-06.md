@@ -215,3 +215,13 @@ After the rebuilt hide-time scroll-scan patch was loaded manually in Firefox, th
 This runtime result materially weakens the hide-time scroll DOM/layout scan as the root cause of the foreground-return reconstruction. The optimization is still reasonable because it removes unnecessary synchronous work during backgrounding, but it did not eliminate the observed symptom.
 
 At this point, further blind patching of hide handlers is not justified. The next step is non-invasive lifecycle instrumentation that can distinguish a resumed existing JavaScript document from a brand-new document/content-process reconstruction. The trace should capture boot identity/time, `visibilitychange`, `pagehide`/`pageshow` and `event.persisted`, navigation entry type, and continuity of the existing `risu-writer-session-id`, without adding any automatic reload.
+
+## Lifecycle instrumentation entry-point inspection
+
+The first instrumentation inspection found:
+
+- `src/ts/bootstrap.ts` is a suitable startup-side location: `loadData()` begins at line 63 and handles normal app initialization, with local-server readiness and storage initialization immediately afterward;
+- a simple grep of `src/ts/log.ts` for exported log helpers / `console.*` returned no hits, so there is not yet evidence that this file provides an immediately reusable lifecycle trace sink;
+- `src/ts/storage/nodeStorage.ts` confirms the writer-lock identity uses the `sessionStorage` key `risu-writer-session-id` around lines 156-168, reading an existing value and minting/storing one if absent.
+
+The next inspection should verify the actual contents of `src/ts/log.ts`, identify the exact call site(s) for `loadData()`, and inspect the session-id getter body before adding any instrumentation. The goal remains a persistent ring trace that survives a new document boot and can tell same-document resume from reconstruction without automatic reload.
