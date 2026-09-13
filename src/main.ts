@@ -5,6 +5,7 @@ import "./ts/storage/database.svelte"
 import App from "./App.svelte";
 import { loadData } from "./ts/bootstrap";
 import { initHotkey } from "./ts/hotkey";
+import { installScreenWakeLock } from "./ts/screenWakeLock";
 import { preLoadCheck } from "./preload";
 import { mount } from "svelte";
 
@@ -17,6 +18,7 @@ preLoadCheck()
 let app = mount(App, {
     target: document.getElementById("app"),
 });
+installScreenWakeLock()
 loadData()
 initHotkey()
 document.getElementById('preloading').remove()
