@@ -1616,7 +1616,17 @@ export async function reloadV3Plugin(plugin:RisuPlugin){
     await executePluginV3(plugin);
 }
 
+function isV3SandboxSuppressedForDiagnostic() {
+    try {
+        return typeof window !== 'undefined' &&
+            new URLSearchParams(window.location.search).get('risuDiagNoV3') === '1'
+    } catch {
+        return false
+    }
+}
+
 export async function executePluginV3(plugin:RisuPlugin){
+    if (isV3SandboxSuppressedForDiagnostic()) return
 
     const alreadyRunning = v3PluginInstances.find(p => p.name === plugin.name);
     if(alreadyRunning){

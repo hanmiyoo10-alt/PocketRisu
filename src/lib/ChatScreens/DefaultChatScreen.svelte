@@ -38,6 +38,7 @@ import { isMobile } from 'src/ts/platform'
     import { getInlayAsset } from 'src/ts/process/files/inlays';
     import { quickMenu } from 'src/ts/hotkey';
     import { loadChatDraft, scheduleSaveChatDraft, flushChatDraft, removeChatDraft } from 'src/ts/storage/chatDraft';
+    import { recordPagePressureDiagnostic, recordRenderWindowDiagnostic, type PagePressureDiagnostic } from '../../ts/log-capture';
 
     import Chats from './Chats.svelte';
     import Button from '../UI/GUI/Button.svelte';
@@ -78,6 +79,7 @@ import { isMobile } from 'src/ts/platform'
     let scrollNavTimer: ReturnType<typeof setTimeout> | null = null
     let chatsInstance: any = $state()
     let isScrollingToMessage = $state(false)
+    let screenshotInProgress = false
     let { openModuleList = $bindable(false), openChatList = $bindable(false), customStyle = '' }: Props = $props();
     let currentCharacter = $derived(DBState.db.characters[$selectedCharID])
     let currentChatSlot = $derived(currentCharacter?.chats[currentCharacter.chatPage])
@@ -179,6 +181,15 @@ import { isMobile } from 'src/ts/platform'
             writeChatScrollSnapshot(key, container)
         }, 120)
     }
+
+    let loadPagesChatKey = ''
+    $effect(() => {
+        const key = chatScrollStorageKey
+        if (!key || key === loadPagesChatKey) return
+
+        loadPagesChatKey = key
+        loadPages = getInitialChatLoadPages(DBState.db)
+    })
 
     $effect(() => {
         const key = chatScrollStorageKey
@@ -353,21 +364,326 @@ import { isMobile } from 'src/ts/platform'
         scheduleSaveChatDraft(chaId, chatId, { m, t })
     })
 
+    let pagePressureScheduleTimer: ReturnType<typeof setTimeout> | null = null
+    let pagePressureIdleHandle: number | null = null
+    let lastPagePressureSample: PagePressureDiagnostic | null = null
+    let lastPagePressureSampleAt = 0
+
+    function cancelPagePressureSampleSchedule() {
+        if (pagePressureScheduleTimer) {
+            clearTimeout(pagePressureScheduleTimer)
+            pagePressureScheduleTimer = null
+        }
+
+        if (pagePressureIdleHandle !== null) {
+            const cancelIdle = (window as any).cancelIdleCallback
+            if (typeof cancelIdle === 'function') {
+                cancelIdle(pagePressureIdleHandle)
+            } else {
+                clearTimeout(pagePressureIdleHandle)
+            }
+            pagePressureIdleHandle = null
+        }
+    }
+
+    function collectPagePressureSample(): PagePressureDiagnostic {
+        const characters = DBState.db.characters ?? []
+        let chatCount = 0
+        let hydratedChatCount = 0
+        let placeholderChatCount = 0
+        let loadedMessageCount = 0
+        let messagesWithPromptInfo = 0
+        let messagesWithPromptText = 0
+        let promptTextBlockCount = 0
+
+        for (const character of characters) {
+            const chats = character?.chats ?? []
+            chatCount += chats.length
+
+            for (const chat of chats) {
+                if (!chat) continue
+                if (chat._placeholder) {
+                    placeholderChatCount += 1
+                    continue
+                }
+
+                hydratedChatCount += 1
+                const messages = Array.isArray(chat.message) ? chat.message : []
+                loadedMessageCount += messages.length
+
+                for (const message of messages) {
+                    if (message.promptInfo) messagesWithPromptInfo += 1
+                    const promptText = message.promptInfo?.promptText
+                    if (Array.isArray(promptText) && promptText.length > 0) {
+                        messagesWithPromptText += 1
+                        promptTextBlockCount += promptText.length
+                    }
+                }
+            }
+        }
+
+        let currentChatDataCodeUnits = 0
+        let currentChatSwipeCodeUnits = 0
+        let currentChatPromptTextBlocks = 0
+        let currentChatPromptTextCodeUnits = 0
+
+        for (const message of currentChat) {
+            currentChatDataCodeUnits += message.data?.length ?? 0
+
+            if (Array.isArray(message.swipes)) {
+                for (const swipe of message.swipes) {
+                    currentChatSwipeCodeUnits += typeof swipe === 'string' ? swipe.length : 0
+                }
+            }
+
+            const promptText = message.promptInfo?.promptText
+            if (Array.isArray(promptText)) {
+                currentChatPromptTextBlocks += promptText.length
+                for (const block of promptText) {
+                    currentChatPromptTextCodeUnits +=
+                        typeof block?.content === 'string' ? block.content.length : 0
+                }
+            }
+        }
+
+        const images = Array.from(document.images)
+        let decodedImageBytesEstimate = 0
+        for (const image of images) {
+            const bytes = image.naturalWidth * image.naturalHeight * 4
+            if (Number.isFinite(bytes) && bytes > 0) {
+                decodedImageBytesEstimate = Math.min(
+                    Number.MAX_SAFE_INTEGER,
+                    decodedImageBytesEstimate + bytes,
+                )
+            }
+        }
+
+        const canvases = Array.from(document.querySelectorAll('canvas'))
+        let canvasBytesEstimate = 0
+        for (const canvas of canvases) {
+            const bytes = canvas.width * canvas.height * 4
+            if (Number.isFinite(bytes) && bytes > 0) {
+                canvasBytesEstimate = Math.min(
+                    Number.MAX_SAFE_INTEGER,
+                    canvasBytesEstimate + bytes,
+                )
+            }
+        }
+
+        const iframes = Array.from(document.getElementsByTagName('iframe'))
+        let iframeSrcdocCodeUnits = 0
+        const iframeSrcdocLengths: number[] = []
+        let sandboxedIframeCount = 0
+        let srcdocIframeCount = 0
+        let hiddenInlineIframeCount = 0
+        let wakeLockIframeCount = 0
+
+        for (const iframe of iframes) {
+            if (iframe.hasAttribute('sandbox')) sandboxedIframeCount += 1
+
+            const srcdoc = iframe.getAttribute('srcdoc')
+            if (srcdoc !== null) {
+                srcdocIframeCount += 1
+                iframeSrcdocCodeUnits += srcdoc.length
+                iframeSrcdocLengths.push(srcdoc.length)
+            }
+
+            if (iframe.style.display === 'none') hiddenInlineIframeCount += 1
+            if (iframe.getAttribute('allow')?.includes('screen-wake-lock')) {
+                wakeLockIframeCount += 1
+            }
+        }
+
+        const sortedIframeSrcdocLengths = [...iframeSrcdocLengths].sort((a, b) => a - b)
+        const iframeSrcdocMinCodeUnits = sortedIframeSrcdocLengths[0] ?? 0
+        const iframeSrcdocMaxCodeUnits = sortedIframeSrcdocLengths.at(-1) ?? 0
+        const iframeSrcdocMidpoint = Math.floor(sortedIframeSrcdocLengths.length / 2)
+        const iframeSrcdocMedianCodeUnits = sortedIframeSrcdocLengths.length === 0
+            ? 0
+            : sortedIframeSrcdocLengths.length % 2 === 1
+                ? sortedIframeSrcdocLengths[iframeSrcdocMidpoint]
+                : Math.round((
+                    sortedIframeSrcdocLengths[iframeSrcdocMidpoint - 1] +
+                    sortedIframeSrcdocLengths[iframeSrcdocMidpoint]
+                ) / 2)
+
+        const plugins = Array.isArray(DBState.db.plugins) ? DBState.db.plugins : []
+        const enabledPlugins = plugins.filter(plugin => plugin?.enabled)
+        const enabledV2PluginCount = enabledPlugins.filter(
+            plugin => plugin.version === 2 || plugin.version === '2.1'
+        ).length
+        const enabledV3PluginCount = enabledPlugins.filter(
+            plugin => plugin.version === '3.0'
+        ).length
+        const keepSessionAliveMode =
+            DBState.db.keepSessionAlive === 'off' ||
+            DBState.db.keepSessionAlive === 'pip' ||
+            DBState.db.keepSessionAlive === 'sound'
+                ? DBState.db.keepSessionAlive
+                : 'unknown'
+
+        const performanceMemory = (performance as any).memory
+        const deviceMemory = (navigator as any).deviceMemory
+
+        return {
+            phase: 'sample',
+            sampleAgeMs: 0,
+            characterCount: characters.length,
+            chatCount,
+            hydratedChatCount,
+            placeholderChatCount,
+            loadedMessageCount,
+            messagesWithPromptInfo,
+            messagesWithPromptText,
+            promptTextBlockCount,
+            currentChatMessageCount: currentChat.length,
+            currentChatDataCodeUnits,
+            currentChatSwipeCodeUnits,
+            currentChatPromptTextBlocks,
+            currentChatPromptTextCodeUnits,
+            domElementCount: document.getElementsByTagName('*').length,
+            imageCount: images.length,
+            decodedImageBytesEstimate,
+            canvasCount: canvases.length,
+            canvasBytesEstimate,
+            iframeCount: iframes.length,
+            sandboxedIframeCount,
+            srcdocIframeCount,
+            hiddenInlineIframeCount,
+            wakeLockIframeCount,
+            iframeSrcdocCodeUnits,
+            iframeSrcdocMinCodeUnits,
+            iframeSrcdocMedianCodeUnits,
+            iframeSrcdocMaxCodeUnits,
+            enabledPluginCount: enabledPlugins.length,
+            enabledV2PluginCount,
+            enabledV3PluginCount,
+            keepSessionAliveMode,
+            audioCount: document.getElementsByTagName('audio').length,
+            videoCount: document.getElementsByTagName('video').length,
+            performanceMemorySupported:
+                !!performanceMemory &&
+                typeof performanceMemory.usedJSHeapSize === 'number',
+            usedJSHeapSize:
+                typeof performanceMemory?.usedJSHeapSize === 'number'
+                    ? performanceMemory.usedJSHeapSize
+                    : undefined,
+            totalJSHeapSize:
+                typeof performanceMemory?.totalJSHeapSize === 'number'
+                    ? performanceMemory.totalJSHeapSize
+                    : undefined,
+            jsHeapSizeLimit:
+                typeof performanceMemory?.jsHeapSizeLimit === 'number'
+                    ? performanceMemory.jsHeapSizeLimit
+                    : undefined,
+            deviceMemoryGiB:
+                typeof deviceMemory === 'number' ? deviceMemory : undefined,
+        }
+    }
+
+    function runPagePressureSample() {
+        if (document.visibilityState !== 'visible') return
+
+        try {
+            const detail = collectPagePressureSample()
+            lastPagePressureSample = detail
+            lastPagePressureSampleAt = Date.now()
+            recordPagePressureDiagnostic(detail)
+        } catch {
+            // Diagnostic only: sampling must never affect chat behavior.
+        }
+    }
+
+    function schedulePagePressureSample(delayMs = 1500) {
+        if (document.visibilityState !== 'visible') return
+
+        cancelPagePressureSampleSchedule()
+        pagePressureScheduleTimer = setTimeout(() => {
+            pagePressureScheduleTimer = null
+            if (document.visibilityState !== 'visible') return
+
+            const run = () => {
+                pagePressureIdleHandle = null
+                runPagePressureSample()
+            }
+            const requestIdle = (window as any).requestIdleCallback
+
+            if (typeof requestIdle === 'function') {
+                pagePressureIdleHandle = requestIdle(run, { timeout: 3000 })
+            } else {
+                pagePressureIdleHandle = window.setTimeout(run, 250)
+            }
+        }, delayMs)
+    }
+
+    function recordCachedPagePressure(phase: 'hidden-cache' | 'pagehide-cache') {
+        if (!lastPagePressureSample || lastPagePressureSampleAt <= 0) return
+
+        recordPagePressureDiagnostic({
+            ...lastPagePressureSample,
+            phase,
+            sampleAgeMs: Math.max(0, Date.now() - lastPagePressureSampleAt),
+        })
+    }
+
+    $effect(() => {
+        schedulePagePressureSample(2500)
+        const interval = setInterval(() => {
+            if (document.visibilityState === 'visible') {
+                schedulePagePressureSample(0)
+            }
+        }, 180_000)
+
+        return () => {
+            clearInterval(interval)
+            cancelPagePressureSampleSchedule()
+        }
+    })
+
+    $effect(() => {
+        const key = chatScrollStorageKey
+        if (!key) return
+        schedulePagePressureSample(2000)
+    })
+
+    function recordRenderWindow(phase: 'hidden' | 'visible' | 'pagehide') {
+        recordRenderWindowDiagnostic({
+            phase,
+            loadPages: Number.isFinite(loadPages) ? loadPages : 'infinity',
+            messageCount: currentChat.length,
+            mountedMessageCount: chatScrollContainer?.querySelectorAll('[data-chat-index]').length ?? 0,
+            initialLoadPages: getInitialChatLoadPages(DBState.db),
+            chatReady: currentChatReady,
+            restoringChatScroll,
+            scrollingToMessage: isScrollingToMessage,
+            screenshotInProgress,
+            folded: chatFoldedStateMessageIndex.index !== -1,
+        })
+    }
+
     // Best-effort persist on tab hide / unload (refresh, app switch): the
     // unmount cleanup above does not fire on a hard page teardown.
     $effect(() => {
-        const onHide = () => {
+        const onVisibilityChange = () => {
+            recordRenderWindow(document.visibilityState === 'hidden' ? 'hidden' : 'visible')
             if (document.visibilityState === 'hidden') {
+                recordCachedPagePressure('hidden-cache')
+                cancelPagePressureSampleSchedule()
                 persistDraftNow()
+            } else {
+                schedulePagePressureSample(1500)
             }
         }
         const onPageHide = () => {
+            recordRenderWindow('pagehide')
+            recordCachedPagePressure('pagehide-cache')
+            cancelPagePressureSampleSchedule()
             persistDraftNow()
         }
-        document.addEventListener('visibilitychange', onHide)
+        document.addEventListener('visibilitychange', onVisibilityChange)
         window.addEventListener('pagehide', onPageHide)
         return () => {
-            document.removeEventListener('visibilitychange', onHide)
+            document.removeEventListener('visibilitychange', onVisibilityChange)
             window.removeEventListener('pagehide', onPageHide)
         }
     })
@@ -1038,8 +1354,11 @@ import { isMobile } from 'src/ts/platform'
     }
 
     async function screenShot(){
+        const previousLoadPages = loadPages
+        screenshotInProgress = true
         try {
             loadPages = Infinity
+            await tick()
             const html2canvas = await import('html-to-image');
             const chats = document.querySelectorAll('.default-chat-screen .risu-chat')
             alertWait("Taking screenShot...")
@@ -1086,10 +1405,12 @@ import { isMobile } from 'src/ts/platform'
                 mergedCanvas.remove();
             }
             notifySuccess(language.screenshotSaved)
-            loadPages = getInitialChatLoadPages(DBState.db)
         } catch (error) {
             console.error(error)
             notifyError("Error while taking screenshot")
+        } finally {
+            loadPages = previousLoadPages
+            screenshotInProgress = false
         }
     }
 
@@ -1520,6 +1841,17 @@ import { isMobile } from 'src/ts/platform'
             const isAtBottom = lastEl ? lastEl.getBoundingClientRect().top <= chatTarget.getBoundingClientRect().bottom + 100 : true;
             if(isAtBottom){
                 showNewMessageButton = false;
+                const initialLoadPages = getInitialChatLoadPages(DBState.db)
+                if (
+                    scrolled >= 100 &&
+                    !restoringChatScroll &&
+                    !isScrollingToMessage &&
+                    !screenshotInProgress &&
+                    chatFoldedStateMessageIndex.index === -1 &&
+                    loadPages > initialLoadPages
+                ) {
+                    loadPages = initialLoadPages
+                }
             }
         }}>
             {@render composerCluster()}
