@@ -29,7 +29,7 @@ import { getActiveHypaV3Preset } from "./memory/memoryPresets"
 import { resolveModelPresetContextBudget } from "./request/contextBudget"
 import { getModuleAssets, getModuleLorebooks, getModules, getModuleToggles, getModuleTriggers } from "./modules";
 import { hydrateAssetListsForCbs, serializeForCbsScan } from "../parser/assetListHydration";
-import { forageStorage, readImage, resolvePrioritizedAssetManifestNames } from "../globalApi.svelte";
+import { ensureWriterReadyForUserEdit, forageStorage, readImage, resolvePrioritizedAssetManifestNames } from "../globalApi.svelte";
 import { pluginV2 } from "../plugins/plugins.svelte";
 import { abortGeneration, chatGenKey, chatProcessStage, endGeneration, isChatGenerating, onDatabaseRebased, registerAbort, setGenerationStage, startGeneration } from "./generationState";
 import { clearPendingSend, registerPendingSend } from "./request/pendingSends";
@@ -124,6 +124,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     requestStartedAt?:number
     responseModelLabel?:string
 } = {}):Promise<boolean> {
+
+    if (!arg.preview && !arg.previewPrompt && !await ensureWriterReadyForUserEdit()) {
+        return false
+    }
 
     chatProcessStage.set(0)
     // Callers without a signal (multisend, commands, dev tools) get an

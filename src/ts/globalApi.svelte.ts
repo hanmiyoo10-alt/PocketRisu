@@ -32,6 +32,7 @@ import { deepTouch } from "./gui/deepTouch.svelte";
 import { pruneHiddenCharacterIds } from "./characterOrder";
 import { updateLorebooks, deselectCharacter } from "./characters";
 import { mergeServerDbWithTrackedLocalChanges, withTrackedCharacters, hasAmbiguousCharacterIds } from "./storage/rebaseMerge";
+import { WriterEditGuard } from "./storage/writerEditGuard";
 import { generationStates, chatGenKey, notifyDatabaseRebased, abortGeneration } from "./process/generationState";
 
 /** A save the server will keep refusing in this state (or one that keeps
@@ -421,6 +422,7 @@ export let requiresFullEncoderReload = $state({
 let requestImmediateSaveImpl: ((options?: {
     forceFullWrite?: boolean
 }) => Promise<void> | void) = () => {}
+let ensureWriterReadyForUserEditImpl: (() => Promise<boolean>) = async () => true
 let patchSyncBaseline: Database | null = null
 let activeSavePatcher: RisuSavePatcher | null = null
 
@@ -531,6 +533,10 @@ export function requestImmediateSave(options?: {
     return requestImmediateSaveImpl(options)
 }
 
+export function ensureWriterReadyForUserEdit() {
+    return ensureWriterReadyForUserEditImpl()
+}
+
 export function setPatchSyncBaseline(data: Database | null) {
     patchSyncBaseline = data ? safeStructuredClone(data) as Database : null
 }
@@ -538,6 +544,7 @@ export function setPatchSyncBaseline(data: Database | null) {
 export async function saveDb() {
     let changed = false
     let gotChannel = false
+    const writerEditGuard = new WriterEditGuard()
     const sessionID = v4()
     let saveInFlight: Promise<void> | null = null
     const knownChatIdsByCharacter = new Map<string, Set<string>>(
@@ -548,6 +555,22 @@ export async function saveDb() {
                 new Set((character.chats ?? []).map(chat => chat?.id).filter(Boolean)),
             ])
     )
+    const resolveWriterReadyForEdit = async (showAlert = false) => {
+        if (!gotChannel && !writerEditGuard.isBlocked()) return true
+        const ready = await writerEditGuard.resolve({
+            supportsServerLock: supportsPatchSync,
+            getWriterLockState: () => forageStorage.getWriterLockState(),
+        })
+        if (ready) {
+            gotChannel = false
+            return true
+        }
+        gotChannel = true
+        if (showAlert) await alertNormalWait(language.activeTabChange)
+        return false
+    }
+    ensureWriterReadyForUserEditImpl = () => resolveWriterReadyForEdit(true)
+
     let channel: BroadcastChannel
     if (window.BroadcastChannel) {
         channel = new BroadcastChannel('risu-db')
@@ -557,6 +580,7 @@ export async function saveDb() {
             if (ev.data === sessionID) {
                 return
             }
+            writerEditGuard.markPeerActivity()
             if (!gotChannel) {
                 gotChannel = true
                 void alertNormalWait(language.activeTabChange)
@@ -568,6 +592,7 @@ export async function saveDb() {
     // A 423 marks this page conflicted. Keep it blocked from further saves
     // and surface the conflict without automatically reloading the page.
     window.addEventListener('risu-session-deactivated', () => {
+        writerEditGuard.markSessionDeactivated()
         if (!gotChannel) {
             gotChannel = true
             void alertNormalWait(language.activeTabChange)
@@ -590,6 +615,7 @@ export async function saveDb() {
             if (get(doingChat)) return // never yank a running generation
             const state = await forageStorage.getWriterLockState()
             if (state !== 'stale') return
+            writerEditGuard.markSessionDeactivated()
             gotChannel = true
             void alertNormalWait(language.activeTabChange)
         })().catch(() => { /* status check failed — do nothing, write path 423 still guards */ })
