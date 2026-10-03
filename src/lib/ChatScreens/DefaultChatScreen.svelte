@@ -10,7 +10,7 @@
     import { selectedCharID, PlaygroundStore, createSimpleCharacter, hypaV3ModalOpen, ScrollToMessageStore, additionalChatMenu, additionalFloatingActionButtons, chatDeselected, chatPanelStore, alertStore } from "../../ts/stores.svelte";
     import { tick, untrack } from 'svelte';
     import Chat from "./Chat.svelte";
-    import { getAdditionalChatLoadPages, getInitialChatLoadPages } from 'src/ts/chatLoadPages';
+    import { getAdditionalChatLoadPages, getChatScrollRestorePlan, getInitialChatLoadPages } from 'src/ts/chatLoadPages';
     import { type Chat as ChatData, type Message, loadTogglesFromChat } from "../../ts/storage/database.svelte";
     import { DBState } from 'src/ts/stores.svelte';
     import { getCharImage } from "../../ts/characters";
@@ -196,13 +196,25 @@ import { isMobile } from 'src/ts/platform'
             ;(async () => {
                 try {
                     const messageCount = untrack(() => currentChat.length)
-                    const neededLoadPages = Math.max(
-                        0,
-                        messageCount - snapshot.messageIndex + 5
+                    const restorePlan = getChatScrollRestorePlan(
+                        messageCount,
+                        snapshot.messageIndex,
+                        loadPages,
                     )
 
-                    if (loadPages < neededLoadPages) {
-                        loadPages = neededLoadPages
+                    if (!restorePlan.shouldRestore) {
+                        // Exact restoration of a very old position would otherwise
+                        // mount thousands of Chat components before hydration can
+                        // settle. Treat deep snapshots as best-effort and open the
+                        // normal bounded latest-message window instead.
+                        try {
+                            localStorage.removeItem(key)
+                        } catch { /* scroll restoration is best-effort */ }
+                        return
+                    }
+
+                    if (loadPages < restorePlan.targetLoadPages) {
+                        loadPages = restorePlan.targetLoadPages
                     }
 
                     await tick()
