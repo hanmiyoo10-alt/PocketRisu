@@ -6342,12 +6342,15 @@ function sendChatContent(req, res, chat) {
     // be reused for a request with different ones.
     res.setHeader('Vary', 'x-chat-base-count, x-chat-base-fp');
     res.setHeader('Content-Type', 'application/octet-stream');
+    // Chat bodies are dynamic and may differ by delta-base headers. Avoid
+    // Express freshness handling turning a valid body into a bodyless 304.
+    res.setHeader('Cache-Control', 'no-store');
     const base = readChatDeltaBase(req);
     if (base && chatPrefixMatches(chat, base)) {
         res.setHeader('x-chat-delta-base', String(base.count));
-        return res.send(Buffer.from(encodeRisuSaveLegacy({ ...chat, message: chat.message.slice(base.count) })));
+        return res.end(Buffer.from(encodeRisuSaveLegacy({ ...chat, message: chat.message.slice(base.count) })));
     }
-    return res.send(Buffer.from(encodeRisuSaveLegacy(chat)));
+    return res.end(Buffer.from(encodeRisuSaveLegacy(chat)));
 }
 
 app.get('/api/chat-content/:chaId/:chatIndex', async (req, res, next) => {

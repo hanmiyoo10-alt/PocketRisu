@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -91,6 +92,21 @@ function authHeaders(): Record<string, string> {
         'risu-auth': token,
         'x-session-id': 'archive-restore-test-session',
     }
+}
+
+function rawGet(url: string, headers: Record<string, string>) {
+    return new Promise<{ status: number, headers: http.IncomingHttpHeaders, body: Buffer }>((resolve, reject) => {
+        const req = http.get(url, { headers }, (res) => {
+            const chunks: Buffer[] = []
+            res.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+            res.on('end', () => resolve({
+                status: res.statusCode ?? 0,
+                headers: res.headers,
+                body: Buffer.concat(chunks),
+            }))
+        })
+        req.on('error', reject)
+    })
 }
 
 async function writeKey(key: string, value: Uint8Array | Buffer | string) {
@@ -333,6 +349,27 @@ describe('reactivated characters whose chat bodies only the archive rows hold', 
         const back = (await diskDb()).characters.find((c: any) => c.chaId === 'back')
         expect(back.chats[0].message).toEqual([{ role: 'user', data: 'from the row' }, { role: 'char', data: 'reply' }])
     }, 20_000)
+
+    it('chat content does not turn a matching conditional request into 304', async () => {
+        await seedDb(liveWithStubs([
+            { id: 'c1', name: 'One', message: [{ role: 'user', data: 'body' }] },
+        ]))
+
+        const headers = { ...authHeaders(), 'x-chat-id': 'c1' }
+        const first = await fetch(`${base}/api/chat-content/back/0`, { headers })
+        expect(first.status).toBe(200)
+        const firstBody = Buffer.from(await first.arrayBuffer())
+        const hash = crypto.createHash('sha1').update(firstBody).digest('base64').substring(0, 27)
+        const oldExpressEtag = `W/"${firstBody.length.toString(16)}-${hash}"`
+
+        const second = await rawGet(`${base}/api/chat-content/back/0`, {
+            ...headers,
+            'if-none-match': oldExpressEtag,
+        })
+        expect(second.status).toBe(200)
+        expect(String(second.headers['cache-control'] ?? '')).toContain('no-store')
+        expect(second.body.equals(firstBody)).toBe(true)
+    })
 
     // A legacy hybrid chat (`_stub: true` with its messages still inline)
     // already has its body, possibly newer than the row: loading only drops
