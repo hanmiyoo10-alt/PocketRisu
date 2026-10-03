@@ -334,12 +334,21 @@ describe('model-jobs', () => {
             headers: { 'risu-auth': AUTH_TOKEN },
         })
         expect(claimRes.status).toBe(409)
-        upstream.hang = false
-        await fetch(`${base}/api/model-jobs/${json.jobId}`, {
-            method: 'DELETE',
-            headers: { 'risu-auth': AUTH_TOKEN },
-        })
-        await waitForStatus(base, json.jobId, ['aborted'])
+
+        // Keep the upstream hanging until DELETE has definitely landed.
+        // Releasing it first races normal completion against the abort, which
+        // can delete the terminal row before the status poll observes it.
+        try {
+            const delRes = await fetch(`${base}/api/model-jobs/${json.jobId}`, {
+                method: 'DELETE',
+                headers: { 'risu-auth': AUTH_TOKEN },
+            })
+            expect(delRes.status).toBe(200)
+            expect((await delRes.json()).aborted).toBe(true)
+            await waitForStatus(base, json.jobId, ['aborted'])
+        } finally {
+            upstream.hang = false
+        }
     })
 
     it('server restart marks running jobs failed', async () => {
