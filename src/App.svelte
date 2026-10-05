@@ -43,11 +43,13 @@
     import RequestStatusToaster from './lib/UI/GUI/RequestStatusToaster.svelte';
     import { createKeepAliveAudio } from './ts/keepAliveAudio';
     import { RISU_APP_INTERNAL_DRAG_TYPE, RISU_SIDEBAR_DRAG_TYPE } from './ts/dragTypes';
+    import { isFirefox } from './ts/platform';
 
     let aprilFools = $state(new Date().getMonth() === 3 && new Date().getDate() === 1)
     let aprilFoolsPage = $state(0)
     let keepingSessionAlive = $state(false)
     let keepAliveAudio: HTMLAudioElement | null = null
+    const isAndroidFirefox = isFirefox && /Android/i.test(navigator.userAgent)
 
     const getMainDropEffect = (e:DragEvent): DataTransfer['dropEffect'] => {
         const types = Array.from(e.dataTransfer?.types ?? [])
@@ -115,6 +117,11 @@
             break
         }
         case 'sound':{
+            if(isAndroidFirefox){
+                console.warn("Skipping sound session keep-alive on Android Firefox to avoid background CPU kills")
+                keepingSessionAlive = true
+                break
+            }
             console.log("Starting inaudible audio to keep session alive")
             if(!keepAliveAudio){
                 keepAliveAudio = createKeepAliveAudio()
