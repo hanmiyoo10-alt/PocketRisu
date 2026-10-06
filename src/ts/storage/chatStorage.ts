@@ -102,6 +102,11 @@ export const hydrationInFlight = new Set<string>()
 /** Hydration just applied to memory — suppress until next tick */
 export const hydrationJustApplied = new Set<string>()
 
+// Background memory shedding replaces a full Chat with a placeholder in the
+// same reactive slot. Reuse the dirty-tracking suppression contract for that
+// one tick so the lifecycle-only replacement is never persisted as a user edit.
+const lifecycleTransitionJustApplied = new Set<string>()
+
 /** Track in-flight hydration promises to avoid duplicate fetches */
 const hydrationPromises = new Map<string, Promise<Chat | null>>()
 
@@ -131,7 +136,55 @@ export async function saveChatToServer(chaId: string, chatIndex: number, chatId:
  */
 export function isHydrating(chaId: string, chatId: string): boolean {
     const key = chatKey(chaId, chatId)
-    return hydrationInFlight.has(key) || hydrationJustApplied.has(key)
+    return hydrationInFlight.has(key)
+        || hydrationJustApplied.has(key)
+        || lifecycleTransitionJustApplied.has(key)
+}
+
+/**
+ * Release a hydrated chat body from the reactive runtime while preserving the
+ * metadata needed to hydrate it again. The caller MUST persist/flush first.
+ *
+ * This helper never performs I/O: it only swaps the already-safe full Chat for
+ * the same stub-derived placeholder shape used on initial database load.
+ */
+export async function dehydrateChatInPlace(
+    chats: Chat[],
+    index: number,
+    chaId: string,
+): Promise<boolean> {
+    const slot = chats[index]
+    if (!slot || slot._placeholder) return false
+
+    const chatId = slot.id
+    if (!chatId) return false
+
+    const key = chatKey(chaId, chatId)
+    if (
+        hydrationInFlight.has(key)
+        || hydrationJustApplied.has(key)
+        || lifecycleTransitionJustApplied.has(key)
+        || hydrationPromises.has(key)
+    ) {
+        return false
+    }
+
+    // Resolve by id immediately before applying so an index reorder cannot
+    // dehydrate the wrong chat.
+    const currentIndex = chats.findIndex(chat => chat?.id === chatId)
+    if (currentIndex === -1) return false
+
+    const current = chats[currentIndex]
+    if (!current || current._placeholder) return false
+
+    lifecycleTransitionJustApplied.add(key)
+    try {
+        chats[currentIndex] = stubToPlaceholder(chatToStub(current))
+        await tick()
+        return true
+    } finally {
+        lifecycleTransitionJustApplied.delete(key)
+    }
 }
 
 /**
