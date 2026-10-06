@@ -11,7 +11,7 @@ vi.mock('./database.svelte', () => ({
         && !Array.isArray(chat.message),
 }))
 
-const { chatToStub, stubToPlaceholder, convertStubsToPlaceholders, classifyChat } = await import('./chatStorage')
+const { chatToStub, stubToPlaceholder, convertStubsToPlaceholders, classifyChat, dehydrateChatInPlace, isHydrating } = await import('./chatStorage')
 type Chat = any
 type ChatStub = any
 
@@ -62,6 +62,58 @@ describe('chatToStub', () => {
     test('returns input untouched when already a stub', () => {
         const stub: ChatStub = { id: 'c1', name: 't', _stub: true }
         expect(chatToStub(stub)).toBe(stub)
+    })
+})
+
+describe('dehydrateChatInPlace', () => {
+    test('replaces a full chat with a metadata-preserving placeholder under dirty-tracking suppression', async () => {
+        const chats = [blankChat({
+            message: [{ role: 'user', data: 'hello' }],
+            note: 'heavy note',
+            localLore: [{ key: 'heavy lore' }],
+            lastDate: 123,
+            folderId: null as any,
+            modules: ['m1'],
+        })]
+
+        const pending = dehydrateChatInPlace(chats, 0, 'cha-1')
+
+        expect(isHydrating('cha-1', 'c1')).toBe(true)
+
+        const changed = await pending
+        expect(changed).toBe(true)
+        expect(isHydrating('cha-1', 'c1')).toBe(false)
+
+        expect(chats[0]._placeholder).toBe(true)
+        expect(chats[0].message).toEqual([])
+        expect(chats[0].note).toBe('')
+        expect(chats[0].localLore).toEqual([])
+        expect(chats[0].lastDate).toBe(123)
+        expect('folderId' in chats[0]).toBe(true)
+        expect(chats[0].folderId).toBeNull()
+        expect(chats[0].modules).toEqual(['m1'])
+    })
+
+    test('does nothing when the slot is already a placeholder', async () => {
+        const placeholder = stubToPlaceholder({ id: 'c1', name: 't', _stub: true })
+        const chats = [placeholder]
+
+        expect(await dehydrateChatInPlace(chats, 0, 'cha-1')).toBe(false)
+        expect(chats[0]).toBe(placeholder)
+    })
+
+    test('does nothing while the same chat is already hydrating', async () => {
+        const chats = [blankChat({ message: [{ role: 'user', data: 'hello' }] })]
+        // Legacy isHydrating suppression sets are exported specifically so
+        // the dirty tracker can observe an in-flight chat lifecycle transition.
+        const mod = await import('./chatStorage')
+        mod.hydrationInFlight.add('cha-1/c1')
+        try {
+            expect(await dehydrateChatInPlace(chats, 0, 'cha-1')).toBe(false)
+            expect(chats[0]._placeholder).toBeUndefined()
+        } finally {
+            mod.hydrationInFlight.delete('cha-1/c1')
+        }
     })
 })
 

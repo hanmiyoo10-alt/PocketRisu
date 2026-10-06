@@ -17,7 +17,7 @@
     import { chatProcessStage, doingChat, sendChat } from "../../ts/process/index.svelte";
     import { chatGenKey, endGeneration, generationStates, registerAbort, stopGeneration } from "../../ts/process/generationState";
     import { claimPendingSend, clearPendingSend, markResumable, resumableSends, takeResumable } from "../../ts/process/request/pendingSends";
-    import { chatLoadFailures, ensureCurrentChatReady } from "../../ts/storage/chatStorage";
+    import { chatLoadFailures, dehydrateChatInPlace, ensureCurrentChatReady } from "../../ts/storage/chatStorage";
     import { sleep } from "../../ts/util";
     import { language } from "../../lang";
     import { isExpTranslator, translate } from "../../ts/translator/translator";
@@ -30,7 +30,7 @@ import { isMobile } from 'src/ts/platform'
     import MainMenu from '../UI/MainMenu.svelte';
     import AssetInput from './AssetInput.svelte';
     import { scrollWithinContainer } from './scrollWithin';
-    import { aiLawApplies, chatFoldedState, chatFoldedStateMessageIndex, downloadFile } from 'src/ts/globalApi.svelte';
+    import { aiLawApplies, chatFoldedState, chatFoldedStateMessageIndex, downloadFile, flushSaves } from 'src/ts/globalApi.svelte';
     import { runTrigger } from 'src/ts/process/triggers';
     import { v4 } from 'uuid';
     import { processMultiCommand } from 'src/ts/process/command';
@@ -38,6 +38,7 @@ import { isMobile } from 'src/ts/platform'
     import { getInlayAsset } from 'src/ts/process/files/inlays';
     import { quickMenu } from 'src/ts/hotkey';
     import { loadChatDraft, scheduleSaveChatDraft, flushChatDraft, removeChatDraft } from 'src/ts/storage/chatDraft';
+    import { addLog } from '../../ts/log';
 
     import Chats from './Chats.svelte';
     import Button from '../UI/GUI/Button.svelte';
@@ -106,6 +107,11 @@ import { isMobile } from 'src/ts/platform'
     let chatScrollContainer: HTMLElement = $state()
     let chatScrollSaveTimer: ReturnType<typeof setTimeout> | null = null
     let restoringChatScroll = false
+
+    const BACKGROUND_CHAT_DEHYDRATE_DELAY_MS = 5_000
+    const BACKGROUND_CHAT_DEHYDRATE_MIN_MESSAGES = 200
+    let backgroundChatDehydrateTimer: ReturnType<typeof setTimeout> | null = null
+    let backgroundChatDehydrateRun = 0
 
     let chatScrollStorageKey = $derived(
         draftChaId && draftChatId
@@ -366,21 +372,132 @@ import { isMobile } from 'src/ts/platform'
         scheduleSaveChatDraft(chaId, chatId, { m, t })
     })
 
-    // Best-effort persist on tab hide / unload (refresh, app switch): the
-    // unmount cleanup above does not fire on a hard page teardown.
+    function cancelBackgroundChatDehydrate() {
+        backgroundChatDehydrateRun += 1
+        if (backgroundChatDehydrateTimer) {
+            clearTimeout(backgroundChatDehydrateTimer)
+            backgroundChatDehydrateTimer = null
+        }
+    }
+
+    async function dehydrateActiveChatInBackground(run: number) {
+        if (run !== backgroundChatDehydrateRun) return
+        if (document.visibilityState !== 'hidden' || $doingChat) return
+
+        const selectedChar = $selectedCharID
+        const char = DBState.db.characters[selectedChar]
+        const chatIndex = char?.chatPage ?? -1
+        const chat = char?.chats?.[chatIndex]
+
+        if (
+            !char?.chaId
+            || !chat?.id
+            || chat._placeholder
+            || (chat.message?.length ?? 0) < BACKGROUND_CHAT_DEHYDRATE_MIN_MESSAGES
+        ) {
+            return
+        }
+
+        const chaId = char.chaId
+        const chatId = chat.id
+        const messageCount = chat.message.length
+
+        // Hidden-page save starts globally on visibilitychange. Wait until all
+        // tracked edits are durably accepted before releasing the only full
+        // in-memory copy. Any save failure leaves the chat untouched.
+        if (!await flushSaves()) return
+
+        if (
+            run !== backgroundChatDehydrateRun
+            || document.visibilityState !== 'hidden'
+            || $doingChat
+            || $selectedCharID !== selectedChar
+        ) {
+            return
+        }
+
+        const currentChar = DBState.db.characters[selectedChar]
+        const currentChat = currentChar?.chats?.[currentChar.chatPage]
+        if (
+            currentChar?.chaId !== chaId
+            || currentChar.chatPage !== chatIndex
+            || currentChat?.id !== chatId
+            || currentChat._placeholder
+        ) {
+            return
+        }
+
+        if (await dehydrateChatInPlace(currentChar.chats, chatIndex, chaId)) {
+            addLog({
+                level: 'info',
+                source: 'memory-guard',
+                message: 'Background chat dehydrated',
+                description: JSON.stringify({
+                    chaId: chaId.slice(0, 8),
+                    chatId: chatId.slice(0, 8),
+                    messageCount,
+                }),
+            })
+        }
+    }
+
+    function scheduleBackgroundChatDehydrate() {
+        cancelBackgroundChatDehydrate()
+        const run = backgroundChatDehydrateRun
+        backgroundChatDehydrateTimer = setTimeout(() => {
+            backgroundChatDehydrateTimer = null
+            void dehydrateActiveChatInBackground(run)
+        }, BACKGROUND_CHAT_DEHYDRATE_DELAY_MS)
+    }
+
+    async function rehydrateActiveChatOnForeground() {
+        // Let a just-applied dehydrate transition finish its dirty-tracking
+        // suppression tick before asking the normal hydration path to refill it.
+        await tick()
+        if (document.visibilityState !== 'visible') return
+
+        const char = DBState.db.characters[$selectedCharID]
+        const before = char?.chats?.[char?.chatPage]
+        if (!before?._placeholder) return
+
+        const chatId = before.id
+        const hydrated = await ensureActiveChatReady().catch(() => null)
+        if (!hydrated || hydrated.id !== chatId) return
+
+        addLog({
+            level: 'info',
+            source: 'memory-guard',
+            message: 'Background chat rehydrated',
+            description: JSON.stringify({
+                chaId: char.chaId.slice(0, 8),
+                chatId: chatId.slice(0, 8),
+                messageCount: hydrated.message?.length ?? 0,
+            }),
+        })
+    }
+
+    // Persist the composer immediately, then shed a large hydrated chat only
+    // after a short background delay and a successful save flush. Short app
+    // switches therefore do not churn the network/runtime.
     $effect(() => {
-        const onHide = () => {
+        const onVisibilityChange = () => {
             if (document.visibilityState === 'hidden') {
                 persistDraftNow()
+                scheduleBackgroundChatDehydrate()
+            } else {
+                cancelBackgroundChatDehydrate()
+                void rehydrateActiveChatOnForeground()
             }
         }
         const onPageHide = () => {
             persistDraftNow()
+            cancelBackgroundChatDehydrate()
         }
-        document.addEventListener('visibilitychange', onHide)
+        document.addEventListener('visibilitychange', onVisibilityChange)
         window.addEventListener('pagehide', onPageHide)
         return () => {
-            document.removeEventListener('visibilitychange', onHide)
+            cancelBackgroundChatDehydrate()
+            document.removeEventListener('visibilitychange', onVisibilityChange)
             window.removeEventListener('pagehide', onPageHide)
         }
     })
