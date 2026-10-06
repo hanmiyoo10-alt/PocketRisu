@@ -93,4 +93,136 @@ export function installLogCapture() {
     installGlobalHandlers()
 }
 
+const LIFECYCLE_TRACE_KEY = 'risu-lifecycle-trace-v2'
+const LIFECYCLE_TRACE_MAX = 24
+const LIFECYCLE_MIRROR_MAX = 12
+const lifecycleBootId =
+    (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID().slice(0, 8)
+        : Date.now().toString(36)
+
+type LifecycleTraceEntry = {
+    t: number
+    bootId: string
+    event: string
+    visibility: DocumentVisibilityState
+    persisted?: boolean
+    navType: string
+    writerSessionId: string | null
+    wasDiscarded: boolean | null
+    timeOrigin: number
+    readyState: DocumentReadyState
+    historyLength: number
+}
+
+let lifecycleMirrorTimer: ReturnType<typeof setTimeout> | null = null
+
+function getLifecycleNavigationType(): string {
+    try {
+        const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+        return nav?.type ?? 'unknown'
+    } catch {
+        return 'unknown'
+    }
+}
+
+function getLifecycleWriterSessionId(): string | null {
+    try {
+        return sessionStorage.getItem('risu-writer-session-id')?.slice(0, 8) ?? null
+    } catch {
+        return null
+    }
+}
+
+function getLifecycleWasDiscarded(): boolean | null {
+    try {
+        const value = (document as Document & { wasDiscarded?: boolean }).wasDiscarded
+        return typeof value === 'boolean' ? value : null
+    } catch {
+        return null
+    }
+}
+
+function readLifecycleTrace(): LifecycleTraceEntry[] {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(LIFECYCLE_TRACE_KEY) ?? '[]')
+        return Array.isArray(parsed) ? parsed : []
+    } catch {
+        return []
+    }
+}
+
+function mirrorLifecycleTrace() {
+    if (document.visibilityState !== 'visible') return
+    if (lifecycleMirrorTimer) clearTimeout(lifecycleMirrorTimer)
+    lifecycleMirrorTimer = setTimeout(() => {
+        lifecycleMirrorTimer = null
+        const entries = readLifecycleTrace().slice(-LIFECYCLE_MIRROR_MAX)
+        if (entries.length === 0) return
+        addLog({
+            level: 'info',
+            message: 'Lifecycle trace snapshot',
+            description: JSON.stringify(entries),
+            source: 'lifecycle',
+        })
+    }, 2_000)
+}
+
+function recordLifecycleEvent(event: string, persisted?: boolean) {
+    if (typeof window === 'undefined') return
+
+    const entry: LifecycleTraceEntry = {
+        t: Date.now(),
+        bootId: lifecycleBootId,
+        event,
+        visibility: document.visibilityState,
+        persisted,
+        navType: getLifecycleNavigationType(),
+        writerSessionId: getLifecycleWriterSessionId(),
+        wasDiscarded: getLifecycleWasDiscarded(),
+        timeOrigin: Math.round(performance.timeOrigin),
+        readyState: document.readyState,
+        historyLength: history.length,
+    }
+
+    try {
+        const entries = readLifecycleTrace()
+        entries.push(entry)
+        localStorage.setItem(
+            LIFECYCLE_TRACE_KEY,
+            JSON.stringify(entries.slice(-LIFECYCLE_TRACE_MAX)),
+        )
+    } catch {
+        // Diagnostic only. Never affect startup.
+    }
+
+    addLog({
+        level: 'info',
+        message: 'Lifecycle event',
+        description: JSON.stringify(entry),
+        source: 'lifecycle-probe',
+    })
+
+    mirrorLifecycleTrace()
+}
+
+function installLifecycleTrace() {
+    if (typeof window === 'undefined') return
+
+    recordLifecycleEvent('boot')
+
+    document.addEventListener('visibilitychange', () => {
+        recordLifecycleEvent(`visibility:${document.visibilityState}`)
+    })
+
+    window.addEventListener('pagehide', (event) => {
+        recordLifecycleEvent('pagehide', event.persisted)
+    })
+
+    window.addEventListener('pageshow', (event) => {
+        recordLifecycleEvent('pageshow', event.persisted)
+    })
+}
+
 installLogCapture()
+installLifecycleTrace()
