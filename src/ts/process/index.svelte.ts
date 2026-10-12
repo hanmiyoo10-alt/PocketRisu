@@ -23,7 +23,7 @@ import { runInlayScreen } from "./inlayScreen";
 import { runImageEmbedding } from "./transformers";
 import { runLuaEditTrigger } from "./scriptings";
 import { getModelInfo, LLMFlags } from "../model/modellist";
-import { resolveChatModelBinding, resolvePresetMaxOutputTokens, presetSupportsVision } from "./request/modelPresetBinding";
+import { resolveChatModelBinding, resolveClassicModelId, resolvePresetMaxOutputTokens, presetSupportsVision } from "./request/modelPresetBinding";
 import { hypaMemoryV3 } from "./memory/hypav3";
 import { getActiveHypaV3Preset } from "./memory/memoryPresets"
 import { resolveModelPresetContextBudget } from "./request/contextBudget"
@@ -351,8 +351,12 @@ export async function sendChat(chatProcessIndex = -1,arg:{
         }
     }
 
+    // The classic model the main request goes to (a slot-pinned legacy model
+    // included); the global db.aiModel when the main slot is a ModelPreset, as
+    // before. Drives the classic prompt-shaping checks below.
+    const mainModel = resolveClassicModelId(nowChatroom.chats[selectedChat], 'model') ?? DBState.db.aiModel
     let caculatedChatTokens = 0
-    if(DBState.db.aiModel.startsWith('gpt')){
+    if(mainModel.startsWith('gpt')){
         caculatedChatTokens += 5
     }
     else{
@@ -367,7 +371,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     await hydrateAssetListsForCbs(currentChar, promptCbsSources(currentChar, nowChatroom.chats[selectedChat]))
 
     let chatAdditonalTokens = arg.chatAdditonalTokens ?? caculatedChatTokens
-    const tokenizer = new ChatTokenizer(chatAdditonalTokens, DBState.db.aiModel.startsWith('gpt') ? 'noName' : 'name')
+    const tokenizer = new ChatTokenizer(chatAdditonalTokens, mainModel.startsWith('gpt') ? 'noName' : 'name', mainModel)
     let currentChat = runCurrentChatFunction(nowChatroom.chats[selectedChat])
     nowChatroom.chats[selectedChat] = currentChat
     let maxContextTokens = DBState.db.maxContext
@@ -890,7 +894,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
 
     let chats:OpenAIChat[] = examples
 
-    if(!DBState.db.aiModel.startsWith('novelai') && !DBState.db?.promptSettings?.trimStartNewChat){
+    if(!mainModel.startsWith('novelai') && !DBState.db?.promptSettings?.trimStartNewChat){
         chats.push({
             role: 'system',
             content: '[Start a new chat]',
@@ -995,7 +999,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
         }
 
         let multimodal:MultiModal[] = []
-        const modelinfo = getModelInfo(DBState.db.aiModel)
+        const modelinfo = getModelInfo(mainModel)
         if(inlays.length > 0){
             for(const inlay of inlays){
                 const inlayName = inlay.replace('{{inlayed::', '').replace('{{inlay::', '').replace('}}', '').replace('{{inlayeddata::', '')
@@ -1239,7 +1243,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
     }
 
     //continue chat model
-    if(arg.continue && (DBState.db.aiModel.startsWith('claude') || DBState.db.aiModel.startsWith('gpt') || DBState.db.aiModel.startsWith('openrouter') || DBState.db.aiModel.startsWith('reverse_proxy'))){
+    if(arg.continue && (mainModel.startsWith('claude') || mainModel.startsWith('gpt') || mainModel.startsWith('openrouter') || mainModel.startsWith('reverse_proxy'))){
         unformated.postEverything.push({
             role: 'system',
             content: '[Continue the last response]'
@@ -1251,7 +1255,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{
             if(!chat.content.trim() && !(chat.multimodals && chat.multimodals.length > 0)){
                 continue
             }
-            if(!(DBState.db.aiModel.startsWith('gpt') || DBState.db.aiModel.startsWith('claude') || DBState.db.aiModel === 'openrouter' || DBState.db.aiModel === 'reverse_proxy')){
+            if(!(mainModel.startsWith('gpt') || mainModel.startsWith('claude') || mainModel === 'openrouter' || mainModel === 'reverse_proxy')){
                 formated.push(chat)
                 continue
             }
