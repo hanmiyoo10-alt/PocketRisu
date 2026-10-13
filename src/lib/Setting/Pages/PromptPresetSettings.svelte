@@ -12,6 +12,7 @@
     import { alertConfirm, notifyError, notifySuccess } from "src/ts/alert";
     import { DBState, PromptPresetEditorOpen, PromptPresetSubmenuIndex } from "src/ts/stores.svelte";
     import { changeToPreset, copyPreset, downloadPreset, importPreset, saveCurrentPreset, withStableActivePreset } from "src/ts/storage/database.svelte";
+    import { ensureBotPresetHydrated } from "src/ts/storage/botPresetRuntime";
     import { prebuiltPresets } from "src/ts/process/templates/templates";
     import { requestImmediateSave } from "src/ts/globalApi.svelte";
     import { v4 as uuidv4 } from "uuid";
@@ -32,7 +33,18 @@
 
     const folders = $derived(DBState.db.promptPresetFolders ?? [])
 
-    function openEditor(index: number) {
+    async function hydratePresetOrNotify(index: number): Promise<boolean> {
+        try {
+            if (await ensureBotPresetHydrated(index)) return true
+        } catch (error) {
+            console.error('[PresetLazy] Failed to hydrate prompt preset:', error)
+        }
+        notifyError('Failed to load prompt preset')
+        return false
+    }
+
+    async function openEditor(index: number) {
+        if (!await hydratePresetOrNotify(index)) return
         changeToPreset(index)
         view = 'edit'
     }
@@ -75,7 +87,8 @@
         void requestImmediateSave()
     }
 
-    function duplicatePreset(index: number) {
+    async function duplicatePreset(index: number) {
+        if (!await hydratePresetOrNotify(index)) return
         const before = DBState.db.botPresets.length
         copyPreset(index)
         if (DBState.db.botPresets.length > before) {
@@ -85,8 +98,9 @@
         void requestImmediateSave()
     }
 
-    function exportPreset(index: number) {
-        downloadPreset(index, 'risupreset')
+    async function exportPreset(index: number) {
+        if (!await hydratePresetOrNotify(index)) return
+        await downloadPreset(index, 'risupreset')
         notifySuccess(language.presetExported)
     }
 
@@ -98,13 +112,24 @@
             return
         }
         if (!await alertConfirm(`${language.removeConfirm}${preset.name}`)) return
+
+        const removingActive = index === DBState.db.botPresetsId
+        let fallbackId: string | null = null
+        if (removingActive) {
+            const fallbackIndex = index === 0 ? 1 : 0
+            if (!await hydratePresetOrNotify(fallbackIndex)) return
+            fallbackId = DBState.db.botPresets[fallbackIndex]?.id ?? null
+        }
+
         // Flush in-flight top-level edits into the active preset before mutating the array.
         saveCurrentPreset()
-        const removingActive = index === DBState.db.botPresetsId
         withStableActivePreset(() => {
             DBState.db.botPresets = DBState.db.botPresets.filter((_, i) => i !== index)
         })
-        if (removingActive) changeToPreset(0, false)
+        if (removingActive && fallbackId) {
+            const fallbackIndex = DBState.db.botPresets.findIndex(p => p?.id === fallbackId)
+            if (fallbackIndex >= 0) changeToPreset(fallbackIndex, false)
+        }
         notifySuccess(language.presetDeleted)
         void requestImmediateSave()
     }
@@ -116,7 +141,7 @@
     let firstPresetId = $state<number | null>(null)
     let secondPresetId = $state<number | null>(null)
 
-    function handleDiffMode(index: number) {
+    async function handleDiffMode(index: number) {
         if (selectedDiffPreset === index) {
             selectedDiffPreset = null
             firstPresetId = null
@@ -129,7 +154,19 @@
             secondPresetId = null
             return
         }
-        secondPresetId = index
+        const first = firstPresetId
+        const second = index
+        if (
+            first === null
+            || !await hydratePresetOrNotify(first)
+            || !await hydratePresetOrNotify(second)
+        ) {
+            firstPresetId = null
+            secondPresetId = null
+            selectedDiffPreset = null
+            return
+        }
+        secondPresetId = second
         selectedDiffPreset = null
         showDiffModal = true
     }
