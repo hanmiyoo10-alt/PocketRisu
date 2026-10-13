@@ -2,7 +2,8 @@
     import { DBState, selectedCharID, openPresetList, presetSelectCallback } from "src/ts/stores.svelte";
     import { language } from "src/lang";
     import { changeToPreset, getCurrentChat } from "src/ts/storage/database.svelte";
-    import { notifySuccess } from "src/ts/alert";
+    import { notifyError, notifySuccess } from "src/ts/alert";
+    import { ensureBotPresetHydrated } from "src/ts/storage/botPresetRuntime";
     import { ChevronDownIcon, ScrollTextIcon, SlidersHorizontalIcon } from "@lucide/svelte";
     import { v4 } from "uuid";
     import ShButton from "../UI/GUI/ShButton.svelte";
@@ -27,13 +28,34 @@
     )
 
     // Data-sync (옵션 A): when entering a chat whose bindedBotPreset resolves
-    // to a valid preset, flip the global active preset so the rest of the
-    // codebase — which only reads db.botPresetsId — automatically uses the
-    // bound one. No-op when no binding or when already active.
+    // to a valid preset, hydrate it before flipping the global active preset.
+    // A failed hydrate leaves the previous active preset intact.
+    let syncingPresetId = ''
     $effect(() => {
-        if (boundPresetIndex >= 0 && DBState.db.botPresetsId !== boundPresetIndex) {
-            changeToPreset(boundPresetIndex)
+        const targetIndex = boundPresetIndex
+        const targetId = targetIndex >= 0 ? DBState.db.botPresets[targetIndex]?.id : ''
+        if (!targetId || DBState.db.botPresetsId === targetIndex || syncingPresetId === targetId) {
+            return
         }
+
+        syncingPresetId = targetId
+        void ensureBotPresetHydrated(targetIndex)
+            .then((preset) => {
+                if (!preset || preset.id !== targetId) return
+                const chat = DBState.db.characters[$selectedCharID]?.chats?.[DBState.db.characters[$selectedCharID]?.chatPage]
+                if (chat?.bindedBotPreset !== targetId) return
+                const currentIndex = DBState.db.botPresets.findIndex(p => p?.id === targetId)
+                if (currentIndex >= 0 && DBState.db.botPresetsId !== currentIndex) {
+                    changeToPreset(currentIndex)
+                }
+            })
+            .catch((error) => {
+                console.error('[PresetLazy] Failed to hydrate bound prompt preset:', error)
+                notifyError('Failed to load bound prompt preset')
+            })
+            .finally(() => {
+                if (syncingPresetId === targetId) syncingPresetId = ''
+            })
     })
 
     function bindPreset(presetIndex: number) {

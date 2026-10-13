@@ -33,6 +33,7 @@ import { ensureWriterReadyForUserEdit, forageStorage, readImage, resolvePrioriti
 import { pluginV2 } from "../plugins/plugins.svelte";
 import { abortGeneration, chatGenKey, chatProcessStage, endGeneration, isChatGenerating, onDatabaseRebased, registerAbort, setGenerationStage, startGeneration } from "./generationState";
 import { clearPendingSend, registerPendingSend } from "./request/pendingSends";
+import { ensureBotPresetHydrated } from "../storage/botPresetRuntime";
 
 export interface OpenAIChat{
     role: 'system'|'user'|'assistant'|'function'
@@ -249,6 +250,42 @@ export async function sendChat(chatProcessIndex = -1,arg:{
             return false
         }
     }
+
+    // A bound prompt preset used to be synchronized by PromptBind.svelte's UI
+    // effect. Lazy preset hydration makes that synchronization asynchronous,
+    // so a send immediately after changing chats could otherwise race ahead
+    // with the previous active preset. Resolve the bound preset here too,
+    // before any generation/pending-send state is created.
+    if (chatProcessIndex === -1) {
+        const boundPresetId = guardChar?.chats?.[guardChar.chatPage]?.bindedBotPreset
+        if (boundPresetId) {
+            const boundIndex = DBState.db.botPresets.findIndex(
+                preset => preset?.id === boundPresetId
+            )
+            if (boundIndex >= 0) {
+                try {
+                    const preset = await ensureBotPresetHydrated(boundIndex)
+                    if (!preset || preset.id !== boundPresetId) {
+                        throw new Error('Bound prompt preset could not be hydrated')
+                    }
+                    const hydratedIndex = DBState.db.botPresets.findIndex(
+                        candidate => candidate?.id === boundPresetId
+                    )
+                    if (hydratedIndex < 0) {
+                        throw new Error('Bound prompt preset disappeared during hydration')
+                    }
+                    if (DBState.db.botPresetsId !== hydratedIndex) {
+                        changeToPreset(hydratedIndex, true)
+                    }
+                } catch (error) {
+                    console.error('[PresetLazy] Failed to hydrate bound prompt preset before send:', error)
+                    notifyError('Cannot load bound prompt preset', { source: 'preset' })
+                    return false
+                }
+            }
+        }
+    }
+
     const generationId = v4()
     if (internalAbort) registerAbort(genKey, internalAbort)
     startGeneration(genKey, generationId)
@@ -279,7 +316,22 @@ export async function sendChat(chatProcessIndex = -1,arg:{
             notifyError(`Cannot find preset: ${ele}`, { source: 'preset' })
         }
         else{
-            changeToPreset(findId, true)
+            try {
+                const preset = await ensureBotPresetHydrated(findId)
+                const hydratedIndex = preset?.id
+                    ? DBState.db.botPresets.findIndex((candidate) => candidate?.id === preset.id)
+                    : -1
+                if (!preset || hydratedIndex < 0) {
+                    throw new Error(`Preset not found after hydration: ${ele}`)
+                }
+                changeToPreset(hydratedIndex, true)
+            } catch (error) {
+                console.error('[PresetLazy] Failed to hydrate chained preset:', error)
+                notifyError(`Cannot load preset: ${ele}`, { source: 'preset' })
+                endGeneration(genKey, { generationId })
+                if (realChatId) clearPendingSend(realChatId)
+                return false
+            }
         }
     }
 

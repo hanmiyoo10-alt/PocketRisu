@@ -12,6 +12,7 @@
         withStableActivePreset,
     } from "src/ts/storage/database.svelte";
     import { selectSingleFile } from "src/ts/util";
+    import { ensureBotPresetHydrated } from "src/ts/storage/botPresetRuntime";
     import TextInput from "src/lib/UI/GUI/TextInput.svelte";
     import ShButton from "src/lib/UI/GUI/ShButton.svelte";
 
@@ -73,18 +74,38 @@
         const ok = await alertConfirm(`${language.presetDeleteConfirm}\n${presetName}`);
         if (!ok) return;
 
-        // Flush in-flight edits into the active preset BEFORE mutating the array
-        // (mirrors botpreset.svelte:217-235 deletion handling).
-        saveCurrentPreset();
         const removing = activeIndex;
         const removingActive = removing === DBState.db.botPresetsId;
+        let fallbackId: string | null = null;
+        if (removingActive) {
+            const fallbackIndex = removing === 0 ? 1 : 0;
+            try {
+                const fallback = await ensureBotPresetHydrated(fallbackIndex);
+                if (!fallback) {
+                    notifyError('Failed to load fallback prompt preset');
+                    return;
+                }
+                fallbackId = fallback.id ?? null;
+            } catch (error) {
+                console.error('[PresetLazy] Failed to hydrate fallback prompt preset:', error);
+                notifyError('Failed to load fallback prompt preset');
+                return;
+            }
+        }
+
+        // Flush in-flight edits into the active preset BEFORE mutating the array
+        // (mirrors botpreset.svelte deletion handling).
+        saveCurrentPreset();
         withStableActivePreset(() => {
             const presets = DBState.db.botPresets;
             presets.splice(removing, 1);
             DBState.db.botPresets = presets;
         });
-        if (removingActive) {
-            changeToPreset(0, false);
+        if (removingActive && fallbackId) {
+            const fallbackIndex = DBState.db.botPresets.findIndex(p => p?.id === fallbackId);
+            if (fallbackIndex >= 0) {
+                changeToPreset(fallbackIndex, false);
+            }
         }
         notifySuccess(language.presetDeleted);
     }
