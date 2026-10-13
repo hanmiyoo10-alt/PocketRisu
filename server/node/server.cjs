@@ -39,6 +39,7 @@ const { clonePatchSnapshot } = require('./patch-selective-clone.cjs');
 const pluginStorage = require('./plugin-storage-store.cjs');
 const upstreamPluginStorage = require('./upstream-plugin-storage.cjs');
 const { createAssetManifestStore } = require('./assetManifestStore.cjs');
+const { createPresetLazyStore, isPresetStub } = require('./preset-lazy-store.cjs');
 const {
     stripAssetManifests,
     hydrateAssetManifests,
@@ -77,6 +78,7 @@ let dbCache = {};
 let saveTimers = {};
 const SAVE_INTERVAL = 5000;
 let fullChatStore = null; // Map<chaId, Map<chatId, chatObject>> — lazy-initialized
+const presetLazyStore = createPresetLazyStore();
 // chaId → archivedAt of characters activated in this process whose return to
 // `characters` the client has not saved yet. Their chats live only in
 // fullChatStore until then, so initChatStore carries them over (see there).
@@ -316,6 +318,7 @@ function launchBackgroundDbPersist(fullDb, generation, source) {
                     // Safe only because generation is still identical:
                     // fullDb is exactly the state that just hit disk.
                     initChatStore(fullDb);
+                    presetLazyStore.resetFromDb(fullDb);
 
                     clearPersistFailure();
 
@@ -640,8 +643,10 @@ async function flushPendingDbUnlocked() {
                 const raw = kvGet('database/database.bin');
                 if (raw) {
                     const dbObj = normalizeJSON(await decodeRisuSave(raw));
+                    presetLazyStore.resetFromDb(dbObj);
                     const fullDb = hydrateDatabaseForDisk(stripDatabaseForClient(dbObj, { reconcileManifests: true }));
                     kvSet('database/database.bin', Buffer.from(encodeRisuSaveLegacy(fullDb)));
+                    presetLazyStore.resetFromDb(fullDb);
                     clearPersistFailure();
                 }
             }
@@ -744,6 +749,7 @@ async function loadDbCacheIfMissing({ createBackup = false } = {}) {
     // The flush writes only chats the database lists; a body posted before
     // its entry is carried across the rebuild (carryUnlistedChatPosts).
     const dbObj = await initChatStoreFromDisk(await decodeDatabaseWithPersistentChatIds(raw, { createBackup }));
+    presetLazyStore.resetFromDb(dbObj);
     dbCache[DB_HEX_KEY] = normalizeJSON(stripDatabaseForClient(dbObj, { reconcileManifests: true }));
     return true;
 }
@@ -754,6 +760,7 @@ function invalidateDbCache() {
 
     delete dbCache[DB_HEX_KEY];
     fullChatStore = null;
+    presetLazyStore.clear();
     pendingActivations.clear();
     unlistedChatPosts.clear();
     if (saveTimers[DB_HEX_KEY]) {
@@ -1119,7 +1126,8 @@ function stripChatsFromDb(dbObj) {
  */
 function stripDatabaseForClient(dbObj, { reconcileManifests = false } = {}) {
     const chatStripped = stripChatsFromDb(dbObj);
-    return stripAssetManifests(chatStripped, assetManifestStore, {
+    const presetStripped = presetLazyStore.stripForClient(chatStripped);
+    return stripAssetManifests(presetStripped, assetManifestStore, {
         activate: reconcileManifests ? 'reconcile' : true,
     }).db;
 }
@@ -1127,7 +1135,8 @@ function stripDatabaseForClient(dbObj, { reconcileManifests = false } = {}) {
 /** Rebuild the exact legacy shape before any database.bin disk write. */
 function hydrateDatabaseForDisk(clientDb) {
     const chatsHydrated = reassembleFullDb(clientDb);
-    return hydrateAssetManifests(chatsHydrated, assetManifestStore);
+    const presetsHydrated = presetLazyStore.hydrateForDisk(chatsHydrated);
+    return hydrateAssetManifests(presetsHydrated, assetManifestStore);
 }
 
 /**
@@ -1289,6 +1298,7 @@ async function ensureDbRuntimeCache() {
         if (!fullChatStore) {
             fullChatStore = new Map();
         }
+        presetLazyStore.clear();
         if (!dbCache[DB_HEX_KEY]) {
             dbCache[DB_HEX_KEY] = {};
         }
@@ -1308,7 +1318,10 @@ async function ensureDbRuntimeCache() {
     }
 
     if (!dbCache[DB_HEX_KEY]) {
-        dbCache[DB_HEX_KEY] = normalizeJSON(stripChatsFromDb(cacheDbObj));
+        presetLazyStore.resetFromDb(cacheDbObj);
+        dbCache[DB_HEX_KEY] = normalizeJSON(
+            presetLazyStore.stripForClient(stripChatsFromDb(cacheDbObj))
+        );
     }
 }
 
@@ -1490,6 +1503,7 @@ async function persistDbCacheWithChats(filePath, decodedKey) {
     // would resurrect the cleared values until the next /api/read.
     if (decodedKey === 'database/database.bin') {
         initChatStore(fullDb);
+        presetLazyStore.resetFromDb(fullDb);
         lastDbPersistMs = Math.round(performance.now() - persistStartedAt);
     }
 }
@@ -4946,8 +4960,9 @@ app.post('/api/write', async (req, res, next) => {
                     cancelBackgroundDbPersist('/api/write');
                     noteDbMutation();
 
-                    // Re-init chat store only after the new blob reached KV.
+                    // Re-init runtime side-stores only after the new blob reached KV.
                     initChatStore(fullDb);
+                    presetLazyStore.resetFromDb(fullDb);
                     // ETag of what the next /api/read will serve: the
                     // PERSISTED DB, stripped. Not the request bytes — the
                     // split above may have emptied pluginCustomStorage, so
@@ -6663,6 +6678,31 @@ function restoreColdStorageChat(chat) {
     }
 }
 
+// GET /api/preset-content/:presetId — retrieve a full prompt preset from the
+// server-side authoritative store. Initial database reads keep inactive
+// presets as metadata stubs; callers hydrate a target before selecting/editing.
+app.get('/api/preset-content/:presetId', async (req, res, next) => {
+    if (!await checkAuth(req, res)) { return; }
+    try {
+        await ensureDbRuntimeCache();
+        const presetId = req.params.presetId;
+        const cachedPreset = dbCache[DB_HEX_KEY]?.botPresets?.find(
+            candidate => candidate?.id === presetId && !isPresetStub(candidate)
+        );
+        const preset = cachedPreset
+            ? structuredClone(cachedPreset)
+            : presetLazyStore.getFullPreset(presetId);
+        if (!preset) {
+            return res.status(404).json({ error: 'Preset not found' });
+        }
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(Buffer.from(encodeRisuSaveLegacy(preset)));
+    } catch (error) {
+        next(error);
+    }
+});
+
 // GET /api/chat-content/:chaId/:chatIndex — retrieve full chat from server
 // ── Chat delta sync ─────────────────────────────────────────────────────────
 // The client may say "I already hold the first N messages, whose prefix
@@ -6824,10 +6864,12 @@ app.post('/api/chat-content/:chaId/:chatIndex', async (req, res, next) => {
                             const raw = kvGet('database/database.bin');
                             if (raw) {
                                 const dbObj = normalizeJSON(await decodeRisuSave(raw));
+                                presetLazyStore.resetFromDb(dbObj);
                                 const fullDb = hydrateDatabaseForDisk(stripDatabaseForClient(dbObj, { reconcileManifests: true }));
                                 const encoded = Buffer.from(encodeRisuSaveLegacy(fullDb));
                                 try {
                                     kvSet('database/database.bin', encoded);
+                                    presetLazyStore.resetFromDb(fullDb);
                                 } catch (err) {
                                     if (err && typeof err === 'object') {
                                         try { err.attemptedSize = encoded.length; } catch {}

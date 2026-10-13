@@ -3,7 +3,9 @@
     // editing and folder management live in Settings → Prompt.
     import { ChevronDownIcon, ChevronRightIcon, FolderIcon, GitCompare, SearchIcon, SettingsIcon, XIcon } from "@lucide/svelte";
     import { language } from "../../lang";
+    import { notifyError } from "../../ts/alert";
     import { changeToPreset } from "../../ts/storage/database.svelte";
+    import { ensureBotPresetHydrated } from "../../ts/storage/botPresetRuntime";
     import { DBState, presetSelectCallback, selectedCharID } from 'src/ts/stores.svelte';
     import { get } from 'svelte/store';
     import { openSettings, SettingsRoute } from 'src/ts/routing';
@@ -54,12 +56,23 @@
         expanded = next;
     }
 
-    function select(index: number) {
+    async function hydratePresetOrNotify(index: number): Promise<boolean> {
+        try {
+            if (await ensureBotPresetHydrated(index)) return true
+        } catch (error) {
+            console.error('[PresetLazy] Failed to hydrate prompt preset:', error)
+        }
+        notifyError('Failed to load prompt preset')
+        return false
+    }
+
+    async function select(index: number) {
         const cb = get(presetSelectCallback)
         if (cb) {
             presetSelectCallback.set(null)
             cb(index)
         } else {
+            if (!await hydratePresetOrNotify(index)) return
             changeToPreset(index)
         }
         close()
@@ -70,7 +83,7 @@
     let firstPresetId = $state<number | null>(null);
     let secondPresetId = $state<number | null>(null);
 
-    function handleDiffMode(id: number) {
+    async function handleDiffMode(id: number) {
         if (selectedDiffPreset === id) {
             selectedDiffPreset = null
             firstPresetId = null
@@ -83,7 +96,19 @@
             secondPresetId = null
             return
         }
-        secondPresetId = id
+        const first = firstPresetId
+        const second = id
+        if (
+            first === null
+            || !await hydratePresetOrNotify(first)
+            || !await hydratePresetOrNotify(second)
+        ) {
+            firstPresetId = null
+            secondPresetId = null
+            selectedDiffPreset = null
+            return
+        }
+        secondPresetId = second
         selectedDiffPreset = null
         showDiffModal = true
     }

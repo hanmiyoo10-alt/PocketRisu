@@ -1344,6 +1344,20 @@ export class NodeStorage{
         await this.postRisuAccount('apply')
     }
 
+    // ── Prompt preset content (runtime lazy load) ──────────────────────────
+
+    async fetchBotPresetContent(presetId: string): Promise<any | null> {
+        const da = await this.authFetchGetWithFirstByteTimeout(
+            `/api/preset-content/${encodeURIComponent(presetId)}`,
+        )
+        if (da.status === 404) return null
+        if (da.status < 200 || da.status >= 300) {
+            throw new Error(`fetchBotPresetContent error: ${da.status}`)
+        }
+        const buffer = new Uint8Array(await da.arrayBuffer())
+        return await decodeRisuSave(buffer)
+    }
+
     // ── Chat content (runtime lazy load) ────────────────────────────────────
 
     async fetchChatContent(chaId: string, chatIndex: number, chatId: string): Promise<any | null> {

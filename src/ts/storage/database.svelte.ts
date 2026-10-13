@@ -21,6 +21,7 @@ import { applyModelPresetDefaults } from '../preset/dbDefaults';
 import type { ApiKeyPoolEntry, ModelBindingFields, ModelBindingSet, ModelPreset, ModelPresetMigrationSummary, RegistryCache } from '../preset/types';
 import { emptyModelBinding } from '../preset/types';
 import { isChatStub } from './chatStub';
+import { isBotPresetStub } from './botPresetHydration';
 
 //APP_VERSION_POINT is to locate the app version in the database file for version bumping
 export let appVer = "2026.2.291" //<APP_VERSION_POINT>
@@ -2814,7 +2815,11 @@ export function copyPreset(id:number){
     saveCurrentPreset()
     let db = getDatabase()
     let pres = db.botPresets
-    const newPres = safeStructuredClone(pres[id])
+    const sourcePreset = pres[id]
+    if (isBotPresetStub(sourcePreset)) {
+        throw new Error(`Prompt preset ${sourcePreset?.id ?? id} must be hydrated before copy`)
+    }
+    const newPres = safeStructuredClone(sourcePreset)
     newPres.id = uuidv4()
     newPres.name += " Copy"
     db.botPresets.push(newPres)
@@ -2829,7 +2834,11 @@ export function changeToPreset(id =0, savecurrent = true){
     const newPres = pres?.[id]
     if(!newPres){
         console.warn('[Preset] changeToPreset target has no preset', { id, length: pres?.length })
-        return
+        return false
+    }
+    if (isBotPresetStub(newPres)) {
+        console.warn(`[PresetLazy] Refusing to activate unhydrated preset ${newPres?.id ?? id}`)
+        return false
     }
     db.botPresetsId = id
     db = setPreset(db, newPres)
@@ -2837,9 +2846,14 @@ export function changeToPreset(id =0, savecurrent = true){
     if(chat){
         loadTogglesFromChat(chat)
     }
+    return true
 }
 
 export function setPreset(db:Database, newPres: botPreset){
+    if (isBotPresetStub(newPres)) {
+        console.warn(`[PresetLazy] Refusing to apply unhydrated preset ${(newPres as any)?.id ?? '<missing>'}`)
+        return db
+    }
     db.apiType = newPres.apiType ?? db.apiType
     db.localNetworkMode = newPres.localNetworkMode ?? db.localNetworkMode
     db.localNetworkTimeoutSec = newPres.localNetworkTimeoutSec ?? db.localNetworkTimeoutSec
@@ -3157,7 +3171,11 @@ import type { OpenAIChat } from '../process/index.svelte';
 export async function downloadPreset(id:number, type:'json'|'risupreset'|'return' = 'json'){
     saveCurrentPreset()
     let db = getDatabase()
-    let pres = safeStructuredClone(db.botPresets[id])
+    const sourcePreset = db.botPresets[id]
+    if (isBotPresetStub(sourcePreset)) {
+        throw new Error(`Prompt preset ${sourcePreset?.id ?? id} must be hydrated before export`)
+    }
+    let pres = safeStructuredClone(sourcePreset)
     console.log(pres)
     pres.openAIKey = ''
     pres.forceReplaceUrl = ''
