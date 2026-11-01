@@ -9,7 +9,7 @@ import { MobileGUI, botMakerMode, selectedCharID, loadedStore, DBState, LoadingS
 import { recordDbTransferSize } from "./transferSize";
 import { newSaveTiming, recordSaveSample, type SaveOutcome, type SaveTiming } from "./storage/saveMetrics";
 import { loadPlugins } from "./plugins/plugins.svelte";
-import { alertConfirm, alertConfirmMulti, alertError, alertMd, alertNormalWait, alertSelect, alertTOS, waitAlert, notifySuccess, notifyError, notifyInfo } from "./alert";
+import { alertClear, alertConfirm, alertConfirmMulti, alertError, alertMd, alertNormalWait, alertSelect, alertTOS, alertWait, waitAlert, notifySuccess, notifyError, notifyInfo } from "./alert";
 import { hasher } from "./parser/parser.svelte";
 import { characterURLImport, hubURL } from "./characterCards";
 import { defaultJailbreak, defaultMainPrompt, oldJailbreak, oldMainPrompt } from "./storage/defaultPrompts";
@@ -590,31 +590,46 @@ export async function saveDb() {
                 new Set((character.chats ?? []).map(chat => chat?.id).filter(Boolean)),
             ])
     )
-    const resolveWriterReadyForEdit = async (showAlert = false) => {
+    // v1.17 owns writer-role recovery through its explicit claim + reload
+    // handoff. The custom edit guard only prevents a stale/handed-off page
+    // from starting another user send before that recovery completes.
+    const resolveWriterReadyForEdit = async () => {
         if (!gotChannel && !writerEditGuard.isBlocked()) return true
-        const ready = await writerEditGuard.resolve({
-            supportsServerLock: supportsPatchSync,
-            getWriterLockState: () => forageStorage.getWriterLockState(),
-        })
-        if (ready) {
-            gotChannel = false
-            return true
-        }
         gotChannel = true
-        if (showAlert) await alertNormalWait(language.activeTabChange)
+        await resolveSessionHandoff('tab')
         return false
     }
-    ensureWriterReadyForUserEditImpl = () => resolveWriterReadyForEdit(true)
+    ensureWriterReadyForUserEditImpl = resolveWriterReadyForEdit
 
     let channel: BroadcastChannel
     if (window.BroadcastChannel) {
         channel = new BroadcastChannel('risu-db')
     }
     // Every way this tab loses the writer role ends here. Saving stops first
-    // (gotChannel); a reload then happens as before when nothing is unsaved,
-    // otherwise only after the user chose it, with the unsaved edits
-    // downloadable first. Cancel keeps the tab open with saving paused.
+    // (gotChannel); a reload then follows, on its own for a return check
+    // with nothing unsaved, otherwise once the user confirmed it, with any
+    // unsaved edits downloadable first. Cancel keeps the tab open with saving
+    // paused.
     let handoffDialogOpen = false
+    // The user chose to keep working in this tab: take the writer role back
+    // before reloading, or a holder that keeps saving on its own (a tab left
+    // open on another device) turns this one stale again after every reload.
+    // The screen stays blocked while the claim is under way; an edit that
+    // still slipped in (a plugin, a finishing reply) would be reloaded away,
+    // so then it returns false and the caller offers the unsaved-edits choice.
+    async function claimAndReload(): Promise<boolean> {
+        const seq = editSeq
+        alertWait(language.loading)
+        try {
+            await forageStorage.claimWriterLock()
+        } catch { /* handled like a refused claim: the reload takes over with its first action */ }
+        if (editSeq !== seq) {
+            alertClear()
+            return false
+        }
+        location.reload()
+        return true
+    }
     async function resolveSessionHandoff(kind: 'tab' | 'return', reason: string | null = null) {
         if (handoffDialogOpen) return
         handoffDialogOpen = true
@@ -623,12 +638,35 @@ export async function saveDb() {
             if (saveInFlight) await saveInFlight.catch(() => {})
             if (editSeq <= savedEditSeq) {
                 if (kind === 'return') {
-                    try { sessionStorage.setItem('risu-session-handoff-reload', '1') } catch { /* toast is best-effort */ }
-                } else {
-                    await alertNormalWait(reason === 'ACCOUNT_IMPORT_ACTIVE' ? language.risuAccountImportActive : language.activeTabChange)
+                    // A reload the user did not ask for never claims. Its
+                    // mark lets the next page notice a repeat; without
+                    // storage a repeat would go unnoticed, so ask right away.
+                    let marked = false
+                    try {
+                        sessionStorage.setItem('risu-session-handoff-reload', String(Date.now()))
+                        marked = true
+                    } catch { /* ask below */ }
+                    if (marked) {
+                        location.reload()
+                        return
+                    }
                 }
-                location.reload()
-                return
+                // An account import refuses every claim, so none is asked for.
+                if (reason === 'ACCOUNT_IMPORT_ACTIVE') {
+                    await alertNormalWait(language.risuAccountImportActive)
+                    location.reload()
+                    return
+                }
+                // Only the button counts as the user's answer. The dialog
+                // also closes without one (cancel, outside click, or other
+                // code clearing alerts), and that must not take the lock
+                // from a device that may be in use: saving stays paused.
+                const choice = await alertConfirmMulti(language.activeTabChange, [language.confirm])
+                if (choice !== 0) {
+                    notifyInfo(language.sessionUnsavedPaused)
+                    return
+                }
+                if (await claimAndReload()) return
             }
             while (true) {
                 const choice = await alertConfirmMulti(language.sessionUnsavedTitle, [
@@ -644,8 +682,12 @@ export async function saveDb() {
                     continue
                 }
                 if (choice === 1) {
-                    location.reload()
-                    return
+                    if (reason === 'ACCOUNT_IMPORT_ACTIVE') {
+                        location.reload()
+                        return
+                    }
+                    if (await claimAndReload()) return
+                    continue
                 }
                 notifyInfo(language.sessionUnsavedPaused)
                 return
@@ -689,28 +731,30 @@ export async function saveDb() {
                 return
             }
             writerEditGuard.markPeerActivity()
-            if (!gotChannel) {
-                gotChannel = true
-                void alertNormalWait(language.activeTabChange)
-            }
+            handOffSession()
         }
     }
     // Cross-device single-writer lock: mirrors BroadcastChannel behavior
     // across devices via server-side session check (423 → deactivate).
-    // A 423 marks this page conflicted. Keep it blocked from further saves
-    // and surface the conflict without automatically reloading the page.
-    window.addEventListener('risu-session-deactivated', () => {
+    // With reload-on-return below, a write actually reaching 423 means TRUE
+    // simultaneous use of two devices, or a tab left open on another device
+    // that keeps saving on its own. Mark the custom edit guard stale before
+    // handing control to v1.17's explicit claim + reload flow.
+    window.addEventListener('risu-session-deactivated', (event) => {
         writerEditGuard.markSessionDeactivated()
-        if (!gotChannel) {
-            gotChannel = true
-            void alertNormalWait(language.activeTabChange)
-        }
+        handOffSession(event)
     })
 
-    // Foreground-return stale check: if another writer changed data while this
-    // page was away, block this stale page from further saves and warn the user.
-    // Full-page refresh remains manual-only.
+    // Reload-on-return: while this tab was hidden, another device may have
+    // taken the writer lock and changed data. Check when the user comes back,
+    // before the next write can lose the very change being saved.
     let lastLockReturnCheck = 0
+    // When the previous page life ended in a reload-on-return. Stale again
+    // soon after one means something keeps saving elsewhere (a tab left open
+    // on another device): another silent reload would only repeat, so the
+    // user is asked instead, and confirming takes the lock (claimAndReload).
+    const RETURN_RELOAD_REPEAT_MS = 60_000
+    let returnReloadAt = 0
     const checkWriterLockOnReturn = () => {
         if (gotChannel) return
         const nowMs = Date.now()
@@ -728,16 +772,30 @@ export async function saveDb() {
                 return
             }
             const state = await forageStorage.getWriterLockState()
-            if (state !== 'stale') return
+            // Holding the lock ends a run of stale returns. 'fresh' does not:
+            // the other device may simply not have saved again yet.
+            if (state === 'active') returnReloadAt = 0
+            if (state !== 'stale' || gotChannel) return
             writerEditGuard.markSessionDeactivated()
             gotChannel = true
-            void alertNormalWait(language.activeTabChange)
+            await resolveSessionHandoff(Date.now() - returnReloadAt < RETURN_RELOAD_REPEAT_MS ? 'tab' : 'return')
         })().catch(() => { /* status check failed — do nothing, write path 423 still guards */ })
     }
     window.addEventListener('focus', checkWriterLockOnReturn)
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') checkWriterLockOnReturn()
     })
+
+    // Post-handoff notice from a reload-on-return in the previous page life.
+    // Delayed so the toast container is mounted before it fires.
+    try {
+        const handoffReload = sessionStorage.getItem('risu-session-handoff-reload')
+        if (handoffReload) {
+            sessionStorage.removeItem('risu-session-handoff-reload')
+            returnReloadAt = Number(handoffReload) || 0
+            setTimeout(() => notifyInfo(language.sessionHandoffReload), 1500)
+        }
+    } catch { /* storage unavailable — skip the notice */ }
 
     const changeTracker: toSaveType = {
         character: [],
@@ -1665,6 +1723,14 @@ export async function saveDb() {
                     savedEditSeq = Math.max(savedEditSeq, editSeqAtStart)
                     savetrys = 0
                     consecutiveRetries = 0
+                    // Holding the lock ends a run of stale returns, as in the
+                    // return check. A save also passes from a fresh page that
+                    // does not hold it, so ask the server.
+                    if (returnReloadAt) {
+                        void forageStorage.getWriterLockState().then((state) => {
+                            if (state === 'active') returnReloadAt = 0
+                        }).catch(() => {})
+                    }
                 } else if (result === 'retry') {
                     // A rebase requeued the changes; a conflict that never
                     // settles must surface instead of re-downloading forever.
@@ -2021,7 +2087,8 @@ async function fetchWithProxy(url: string, arg: GlobalFetchArgs): Promise<Global
 
         const body = arg.body instanceof URLSearchParams ? arg.body.toString() : JSON.stringify(arg.body);
 
-        const response = await fetch(furl, { body, headers, method: arg.method ?? "POST", signal: arg.abortSignal });
+        // no-store: all targets share the /proxy2 URL (see fetchViaProxy2).
+        const response = await fetch(furl, { body, headers, method: arg.method ?? "POST", signal: arg.abortSignal, cache: 'no-store' });
         const isSuccess = response.ok && response.status >= 200 && response.status < 300;
 
         if (arg.rawResponse) {
@@ -2830,7 +2897,7 @@ async function fetchNativeRaw(url: string, arg: FetchNativeArgs, hooks?: {
 
 const defaultProxyJobHeartbeatSec = 15
 
-async function fetchViaProxy2(
+export async function fetchViaProxy2(
     url: string,
     headers: Record<string, string>,
     realBody: Uint8Array | undefined,
@@ -2849,11 +2916,14 @@ async function fetchViaProxy2(
         proxyHeaders["Content-Type"] = headers["Content-Type"] ?? headers["content-type"] ?? "application/json"
     }
 
+    // Every target shares the one /proxy2 URL (the real one is in risu-url), so
+    // a cached GET response would be served for a different target.
     const r = await fetch(`/proxy2`, {
         body: realBody as any,
         headers: proxyHeaders,
         method: arg.method,
-        signal: arg.signal
+        signal: arg.signal,
+        cache: 'no-store',
     })
 
     return new Response(r.body, {
