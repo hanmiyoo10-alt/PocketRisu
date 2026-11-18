@@ -14,7 +14,7 @@ import { pluginCodeTranspiler } from "./apiV3/transpiler";
 import * as pluginStorageStore from "./pluginStorageStore";
 import { PLUGIN_CUSTOM_STORAGE_KEY, applyPluginDbKey, installApprovedPlugins, pluginCustomStorageProxy } from "./pluginDbProxy";
 import { hydratePluginCharacterSnapshotSync, restorePluginCharacterManifest, restorePluginDbKey } from './pluginCharacterSnapshot';
-import { isPluginScriptStub } from '../storage/pluginScriptHydration';
+import { isPluginScriptStub, resolveIncomingPluginScriptForComparison } from '../storage/pluginScriptHydration';
 import { ensureEnabledPluginScriptsHydrated, ensurePluginScriptHydrated } from '../storage/pluginScriptRuntime';
 
 export const customProviderStore = writable([] as string[])
@@ -1061,7 +1061,14 @@ export async function handlePluginInstallViaPlugin(plugins: RisuPlugin[]){
                 continue
             }
         }
-        if(!DBState.db.plugins.find((p: RisuPlugin) => p.name === plugin.name && p.script === plugin.script)){
+        const installedPlugin = DBState.db.plugins.find((p: RisuPlugin) => p.name === plugin.name)
+        const comparisonScript = resolveIncomingPluginScriptForComparison(plugin, installedPlugin)
+        if (comparisonScript === null) {
+            console.warn('[PluginLazy] Incoming plugin body unavailable for install comparison, skipping:', plugin.name)
+            continue
+        }
+
+        if(!DBState.db.plugins.find((p: RisuPlugin) => p.name === plugin.name && p.script === comparisonScript)){
 
             if(plugin.version !== '3.0'){
                 console.warn(`Plugin "${plugin.name}" has version "${plugin.version}", which is not supported for installation via plugin. Only API version 3.0 plugins can be installed via plugin. Skipping installation of this plugin.`)

@@ -6,6 +6,7 @@ import {
     isPluginScriptHydrationTransitionActive,
     isPluginScriptStub,
     projectPluginForSave,
+    resolveIncomingPluginScriptForComparison,
 } from './pluginScriptHydration'
 
 const stub = (name: string) => ({
@@ -30,7 +31,11 @@ const full = (name: string, script: string) => ({
 describe('plugin script hydration', () => {
     it('hydrates by stable name after reordering and preserves client metadata', async () => {
         const plugins = [stub('a'), stub('b')]
-        const fetchPlugin = async (name: string) => full(name, name + '-code')
+        let stateDuringFetch: boolean | null = null
+        const fetchPlugin = async (name: string) => {
+            stateDuringFetch = isPluginScriptHydrationTransitionActive()
+            return full(name, name + '-code')
+        }
         const waitForTick = async () => {
             plugins.reverse()
             expect(isPluginScriptHydrationTransitionActive()).toBe(true)
@@ -38,6 +43,7 @@ describe('plugin script hydration', () => {
 
         const hydrated = await hydratePluginScriptAtIndex(plugins, 0, fetchPlugin, waitForTick)
 
+        expect(stateDuringFetch).toBe(false)
         expect(hydrated.script).toBe('a-code')
         expect(hydrated.displayName).toBe('A')
         expect(hydrated.realArg).toEqual({ x: 'a' })
@@ -157,6 +163,17 @@ describe('plugin script hydration', () => {
         plugins[currentIndex].enabled = true
         expect(plugins.map(plugin => plugin.name)).toEqual(['b', 'a'])
         expect(plugins[1].script).toBe('a-code')
+    })
+
+
+    it('treats an incoming disabled stub as a reference to the installed full script', () => {
+        const incoming = stub('a')
+        const installed = { ...full('a', 'installed-code'), enabled: false }
+
+        expect(resolveIncomingPluginScriptForComparison(incoming, installed)).toBe('installed-code')
+        expect(resolveIncomingPluginScriptForComparison(incoming, stub('a'))).toBeNull()
+        expect(resolveIncomingPluginScriptForComparison(stub('missing'), null)).toBeNull()
+        expect(resolveIncomingPluginScriptForComparison(full('a', 'new-code'), installed)).toBe('new-code')
     })
 
     it('hydrates all stubs before export', async () => {

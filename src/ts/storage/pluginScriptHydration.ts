@@ -71,6 +71,24 @@ export function projectPluginsForSave(plugins: any): any {
     return plugins.map(projectPluginForSave)
 }
 
+export function resolveIncomingPluginScriptForComparison(incoming: any, installed: any): string | null {
+    if (!incoming || typeof incoming !== 'object') return null
+    if (!isPluginScriptStub(incoming)) {
+        return typeof incoming.script === 'string' ? incoming.script : null
+    }
+
+    if (
+        !installed
+        || typeof installed !== 'object'
+        || installed.name !== incoming.name
+        || isPluginScriptStub(installed)
+        || typeof installed.script !== 'string'
+    ) {
+        return null
+    }
+    return installed.script
+}
+
 export function stripPluginScriptRuntimeMarkers(plugins: any): any {
     if (!Array.isArray(plugins)) return plugins
     return plugins.map(plugin => {
@@ -107,7 +125,6 @@ async function hydratePluginByName(
     if (existingPromise) return existingPromise
 
     const promise = (async () => {
-        hydrationTransitionCount++
         try {
             const fullPlugin = await fetchPlugin(pluginName)
             if (!fullPlugin) return null
@@ -127,11 +144,19 @@ async function hydratePluginByName(
             }
 
             const hydrated = mergeStubMetadata(fullPlugin, current)
-            plugins[currentIndex] = hydrated
-            await waitForTick()
+
+            // Suppress the save effect only for the actual stub -> full
+            // assignment. Network wait time must not hide unrelated user
+            // edits to plugin settings while hydration is in flight.
+            hydrationTransitionCount++
+            try {
+                plugins[currentIndex] = hydrated
+                await waitForTick()
+            } finally {
+                hydrationTransitionCount--
+            }
             return hydrated
         } finally {
-            hydrationTransitionCount--
             hydrationPromises.delete(pluginName)
         }
     })()
