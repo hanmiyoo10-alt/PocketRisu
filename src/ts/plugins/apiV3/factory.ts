@@ -469,6 +469,16 @@ function quietSandboxTerminated(): Promise<never> {
     return failed;
 }
 
+export type SandboxHostDiagnosticSnapshot = {
+    iframeConnected: boolean;
+    remoteInstances: number;
+    abortControllers: number;
+    callbackWrappers: number;
+    pendingCallbacks: number;
+    activeStreams: number;
+    terminated: boolean;
+}
+
 export class SandboxHost {
     private iframe: HTMLIFrameElement;
     private apiFactory: any;
@@ -493,6 +503,18 @@ export class SandboxHost {
 
     constructor(apiFactory: any) {
         this.apiFactory = apiFactory;
+    }
+
+    public getDiagnosticSnapshot(): SandboxHostDiagnosticSnapshot {
+        return {
+            iframeConnected: this.iframe?.isConnected === true,
+            remoteInstances: this.instanceRegistry.size,
+            abortControllers: this.abortControllers.size,
+            callbackWrappers: this.callbackWrapperCache.size,
+            pendingCallbacks: this.pendingCallbacks.size,
+            activeStreams: this.activeStreamCleanups.size,
+            terminated: this.terminated,
+        };
     }
 
     public executeInIframe(code: string): Promise<any> {

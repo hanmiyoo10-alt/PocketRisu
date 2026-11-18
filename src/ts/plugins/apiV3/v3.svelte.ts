@@ -1,5 +1,7 @@
 import { allowedDbKeys, customProviderStore, getV2PluginAPIs, handlePluginInstallViaPlugin, pluginV2, type EditFunction, type PluginV2ProviderArgument, type PluginV2ProviderOptions, type RisuPlugin } from "../plugins.svelte";
 import { SandboxHost } from "./factory";
+import { buildV3RuntimeTelemetrySnapshot } from "./v3RuntimeTelemetry";
+import { addLog } from "src/ts/log";
 import { getCurrentChat, getDatabase, normalizeChat } from "src/ts/storage/database.svelte";
 import { resolveClassicModelId } from "src/ts/process/request/modelPresetBinding";
 import { fetchChatFromServer, saveChatToServer } from "src/ts/storage/chatStorage";
@@ -1605,9 +1607,39 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
 type V3PluginInstance = {
     name: string;
     host: SandboxHost;
+    scriptChars: number;
 }
 
 const v3PluginInstances: V3PluginInstance[] = [];
+let v3RuntimeTelemetryInstalled = false;
+
+function recordV3RuntimeTelemetry(event: string) {
+    if (typeof document === 'undefined') return;
+    const snapshot = buildV3RuntimeTelemetrySnapshot(
+        event,
+        document.visibilityState,
+        v3PluginInstances.map(instance => ({
+            scriptChars: instance.scriptChars,
+            host: instance.host.getDiagnosticSnapshot(),
+        })),
+    );
+    addLog({
+        level: 'info',
+        message: 'V3 runtime lifecycle snapshot',
+        description: JSON.stringify(snapshot),
+        source: 'v3-runtime-telemetry',
+    });
+}
+
+function installV3RuntimeTelemetry() {
+    if (typeof document === 'undefined' || v3RuntimeTelemetryInstalled) return;
+    v3RuntimeTelemetryInstalled = true;
+    document.addEventListener('visibilitychange', () => {
+        recordV3RuntimeTelemetry(`visibility:${document.visibilityState}`);
+    });
+}
+
+installV3RuntimeTelemetry();
 
 // Plugins already told (once per session) why pluginCustomStorage is empty.
 const fullStorageHintShown = new Set<string>()
@@ -1624,6 +1656,7 @@ export async function loadV3Plugins(plugins:RisuPlugin[]){
 
     const loadPromises = plugins.map(plugin => executePluginV3(plugin));
     await Promise.all(loadPromises);
+    recordV3RuntimeTelemetry('load-complete');
 }
 
 export async function reloadV3Plugin(plugin:RisuPlugin){
@@ -1645,7 +1678,8 @@ export async function executePluginV3(plugin:RisuPlugin){
     const host = new SandboxHost(makeRisuaiAPIV3(iframe, plugin));
     v3PluginInstances.push({
         name: plugin.name,
-        host
+        host,
+        scriptChars: plugin.script.length,
     });
     host.run(iframe, plugin.script);
     console.log(`[RisuAI Plugin: ${plugin.name}] Loaded API V3 plugin.`);
