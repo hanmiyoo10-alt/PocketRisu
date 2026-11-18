@@ -6,7 +6,7 @@
     import ShButton from "src/lib/UI/GUI/ShButton.svelte";
     import ShDropdownMenuItem from "src/lib/UI/GUI/ShDropdownMenuItem.svelte";
     import FolderedList, { type FolderedItemPlacement } from "src/lib/UI/FolderedList.svelte";
-    import { alertConfirm, alertMd, alertSelect, notifySuccess } from "src/ts/alert";
+    import { alertConfirm, alertError, alertMd, alertSelect, notifySuccess } from "src/ts/alert";
     import { TriangleAlert } from '@lucide/svelte';
     import ShAlert from "src/lib/UI/GUI/ShAlert.svelte";
 
@@ -23,6 +23,8 @@
     import TextAreaInput from "src/lib/UI/GUI/TextAreaInput.svelte";
     import { hotReloadPluginFiles } from "src/ts/plugins/apiV3/developMode";
     import * as pluginStorageStore from "src/ts/plugins/pluginStorageStore";
+    import { ensurePluginScriptHydrated } from "src/ts/storage/pluginScriptRuntime";
+    import { dehydratePluginScriptAtIndex } from "src/ts/storage/pluginScriptHydration";
 
     // Plugins are keyed by name (no id); track expanded parameter panels by name.
     let showParams = $state<string[]>([])
@@ -53,19 +55,61 @@
         return `https://github.com/PocketRisu/PocketRisu/blob/main/docs/${lang}/plugin-storage.md`
     }
 
-    function togglePlugin(index: number) {
-        const plugin = DBState.db.plugins[index]
+    async function togglePlugin(index: number) {
+        let plugin = DBState.db.plugins[index]
+        if (!plugin) return
+        const pluginName = plugin.name
+
+        if (plugin.enabled !== true) {
+            try {
+                const hydrated = await ensurePluginScriptHydrated(index)
+                if (!hydrated) throw new Error('Plugin content unavailable')
+            } catch (error) {
+                console.error('[PluginLazy] Failed to hydrate plugin before enabling:', error)
+                alertError(language.errors.noData)
+                return
+            }
+        }
+
+        // Hydration awaits network I/O. The user may reorder plugins while it
+        // is pending, so never reuse the captured array index afterward.
+        const currentIndex = DBState.db.plugins.findIndex(p => p?.name === pluginName)
+        if (currentIndex < 0) return
+        plugin = DBState.db.plugins[currentIndex]
         plugin.enabled = !plugin.enabled
-        DBState.db.plugins[index] = plugin
-        loadPlugins()
+        DBState.db.plugins[currentIndex] = plugin
+        if (plugin.enabled !== true) {
+            dehydratePluginScriptAtIndex(DBState.db.plugins, currentIndex)
+        }
+        await loadPlugins()
         void requestImmediateSave()
     }
 
     async function resetPermission(index: number) {
         const plugin = DBState.db.plugins[index]
-        const label = plugin.displayName ?? plugin.name
+        if (!plugin) return
+        const pluginName = plugin.name
+        const label = plugin.displayName ?? pluginName
         if (!await alertConfirm(language.resetPluginPermissionConfirm.replace("{}", label))) return
-        await resetPluginPermission(plugin.name)
+
+        try {
+            const hydrated = await ensurePluginScriptHydrated(index)
+            if (!hydrated) throw new Error('Plugin content unavailable')
+            await resetPluginPermission(pluginName)
+
+            // Return only a server-hydrated disabled body to its stub. The
+            // dehydrate helper deliberately preserves locally-authored full
+            // bodies that may still be awaiting persistence.
+            const currentIndex = DBState.db.plugins.findIndex(p => p?.name === pluginName)
+            if (currentIndex >= 0) {
+                dehydratePluginScriptAtIndex(DBState.db.plugins, currentIndex)
+            }
+        } catch (error) {
+            console.error('[PluginLazy] Failed to hydrate plugin before permission reset:', error)
+            alertError(language.errors.noData)
+            return
+        }
+
         notifySuccess(language.resetPluginPermissionDone.replace("{}", label))
     }
 
