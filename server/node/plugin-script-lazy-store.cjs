@@ -105,18 +105,32 @@ function createPluginScriptLazyStore() {
         const updates = []
         for (const plugin of db.plugins) {
             if (!plugin || typeof plugin !== 'object' || typeof plugin.name !== 'string' || plugin.name.length === 0) {
+                safeToStrip = false
                 return false
             }
-            if (seen.has(plugin.name)) return false
+            if (seen.has(plugin.name)) {
+                safeToStrip = false
+                return false
+            }
             seen.add(plugin.name)
 
-            if (!isPluginScriptStub(plugin)) {
-                if (typeof plugin.script !== 'string') return false
-                updates.push([plugin.name, cloneValue(plugin)])
+            if (isPluginScriptStub(plugin)) {
+                if (!fullByName.has(plugin.name)) {
+                    safeToStrip = false
+                    return false
+                }
+                continue
             }
+
+            if (typeof plugin.script !== 'string') {
+                safeToStrip = false
+                return false
+            }
+            updates.push([plugin.name, cloneValue(plugin)])
         }
 
         for (const [name, plugin] of updates) fullByName.set(name, plugin)
+        safeToStrip = true
         return true
     }
 

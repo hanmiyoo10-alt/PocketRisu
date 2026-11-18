@@ -94,6 +94,41 @@ describe('plugin script lazy store', () => {
         expect(disk.plugins[0].enabled).toBe(false)
     })
 
+    it('fails closed immediately when a runtime patch introduces duplicate names', () => {
+        const store = createPluginScriptLazyStore()
+        const initial = { plugins: [plugin('a', false, 'a-code'), plugin('b', false, 'b-code')] }
+        store.resetFromDb(initial)
+
+        const duplicate = {
+            plugins: [
+                plugin('a', false, 'a-new'),
+                plugin('a', false, 'duplicate-code'),
+            ],
+        }
+        expect(store.rememberFullPlugins(duplicate)).toBe(false)
+        expect(store.stripForClient(duplicate)).toBe(duplicate)
+
+        expect(store.rememberFullPlugins(initial)).toBe(true)
+        const stripped = store.stripForClient(initial)
+        expect(stripped).not.toBe(initial)
+        expect(stripped.plugins.every((item: any) => item._pluginScriptStub === true)).toBe(true)
+    })
+
+    it('fails closed for a stub that has no authoritative full body', () => {
+        const store = createPluginScriptLazyStore()
+        const initial = { plugins: [plugin('known', false, 'known-code')] }
+        store.resetFromDb(initial)
+
+        const unknownStub = {
+            plugins: [{
+                ...plugin('unknown', false, ''),
+                _pluginScriptStub: true,
+            }],
+        }
+        expect(store.rememberFullPlugins(unknownStub)).toBe(false)
+        expect(store.stripForClient(unknownStub)).toBe(unknownStub)
+    })
+
     it('returns cloned authoritative plugin content', () => {
         const store = createPluginScriptLazyStore()
         const db = { plugins: [plugin('p', false, 'secret-code')] }
