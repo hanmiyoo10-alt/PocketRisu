@@ -1392,6 +1392,20 @@ export class NodeStorage{
         return await decodeRisuSave(buffer)
     }
 
+    // ── Disabled plugin script content (runtime lazy load) ─────────────────
+
+    async fetchPluginContent(pluginName: string): Promise<any | null> {
+        const da = await this.authFetchGetWithFirstByteTimeout(
+            `/api/plugin-content/${encodeURIComponent(pluginName)}`,
+        )
+        if (da.status === 404) return null
+        if (da.status < 200 || da.status >= 300) {
+            throw new Error(`fetchPluginContent error: ${da.status}`)
+        }
+        const buffer = new Uint8Array(await da.arrayBuffer())
+        return await decodeRisuSave(buffer)
+    }
+
     // ── Chat content (runtime lazy load) ────────────────────────────────────
 
     async fetchChatContent(chaId: string, chatIndex: number, chatId: string): Promise<any | null> {

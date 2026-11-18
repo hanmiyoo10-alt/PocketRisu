@@ -14,6 +14,8 @@ import { pluginCodeTranspiler } from "./apiV3/transpiler";
 import * as pluginStorageStore from "./pluginStorageStore";
 import { PLUGIN_CUSTOM_STORAGE_KEY, applyPluginDbKey, installApprovedPlugins, pluginCustomStorageProxy } from "./pluginDbProxy";
 import { hydratePluginCharacterSnapshotSync, restorePluginCharacterManifest, restorePluginDbKey } from './pluginCharacterSnapshot';
+import { isPluginScriptStub } from '../storage/pluginScriptHydration';
+import { ensureEnabledPluginScriptsHydrated, ensurePluginScriptHydrated } from '../storage/pluginScriptRuntime';
 
 export const customProviderStore = writable([] as string[])
 
@@ -39,6 +41,10 @@ interface ProviderPlugin {
     allowedIPC?: string[]
     /** V3 only: getDatabase() hands this plugin the whole plugin storage (RisuAI-compatible), even without includeOnly. Off by default; see docs/plugin-storage.md. */
     nodeOnlyFullStorageAccess?: boolean
+    /** NodeOnly runtime-only lazy marker: disabled plugin script is held server-side. */
+    _pluginScriptStub?: true
+    /** NodeOnly runtime-only marker: this full script came from lazy hydration. */
+    _pluginScriptHydrated?: true
 }
 interface ProviderPluginCustomLink {
     link: string
@@ -485,6 +491,13 @@ export async function loadPlugins() {
     console.log('Loading plugins...')
     let db = getDatabase()
 
+    try {
+        await ensureEnabledPluginScriptsHydrated()
+    } catch (error) {
+        console.error('[PluginLazy] Enabled plugin hydration failed; plugin load aborted:', error)
+        return
+    }
+    db = getDatabase()
 
     const enabledPlugins = safeStructuredClone(db.plugins).filter((p: RisuPlugin) => p.enabled)
     const pluginV2 = enabledPlugins.filter((a: RisuPlugin) => a.version === 2 || a.version === '2.1')
@@ -1035,6 +1048,19 @@ export async function handlePluginInstallViaPlugin(plugins: RisuPlugin[]){
 
     const trimmedPlugins: RisuPlugin[] = []
     for(const plugin of plugins){
+        const existingIndex = DBState.db.plugins.findIndex((p: RisuPlugin) => p.name === plugin.name)
+        if (existingIndex >= 0 && isPluginScriptStub(DBState.db.plugins[existingIndex])) {
+            try {
+                const hydrated = await ensurePluginScriptHydrated(existingIndex)
+                if (!hydrated) {
+                    console.error('[PluginLazy] Existing plugin content unavailable before install comparison:', plugin.name)
+                    continue
+                }
+            } catch (error) {
+                console.error('[PluginLazy] Existing plugin hydration failed before install comparison:', error)
+                continue
+            }
+        }
         if(!DBState.db.plugins.find((p: RisuPlugin) => p.name === plugin.name && p.script === plugin.script)){
 
             if(plugin.version !== '3.0'){

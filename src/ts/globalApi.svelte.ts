@@ -16,6 +16,7 @@ import { defaultJailbreak, defaultMainPrompt, oldJailbreak, oldMainPrompt } from
 import { decodeRisuSave, encodeRisuSaveLegacy, findDangerousChatOps, normalizeJSON, RisuSaveEncoder, RisuSavePatcher, type toSaveType } from "./storage/risuSave";
 import { isHydrating, saveChatToServer, ensureChatHydrated, chatToStub, classifyChat, convertStubsToPlaceholders } from "./storage/chatStorage";
 import { isBotPresetHydrationTransitionActive } from "./storage/botPresetHydration";
+import { isPluginScriptHydrationTransitionActive, projectPluginsForSave } from "./storage/pluginScriptHydration";
 import { AutoStorage } from "./storage/autoStorage";
 import {
     ConflictError,
@@ -718,7 +719,7 @@ export async function saveDb() {
         if (changeTracker.botPreset) out.botPresets = db.botPresets
         if (changeTracker.modules) out.modules = db.modules
         // Plugin settings; plugin storage values live in the server kv.
-        if (changeTracker.plugins) out.plugins = db.plugins
+        if (changeTracker.plugins) out.plugins = projectPluginsForSave(db.plugins)
         return JSON.stringify(out, null, 2)
     }
     const handOffSession = (event?: Event) => {
@@ -940,6 +941,9 @@ export async function saveDb() {
             deepTouch(DBState.db.plugins)
             if (!didInitPluginsEffect) {
                 didInitPluginsEffect = true
+                return
+            }
+            if (isPluginScriptHydrationTransitionActive()) {
                 return
             }
             changeTracker.plugins = true
