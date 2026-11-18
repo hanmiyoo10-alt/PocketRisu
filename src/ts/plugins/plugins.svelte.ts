@@ -552,7 +552,7 @@ async function resumeEnabledV3Plugins() {
     const db = getDatabase()
     const enabledV3 = safeStructuredClone(db.plugins)
         .filter((plugin: RisuPlugin) => plugin.enabled && plugin.version === '3.0')
-    await loadV3Plugins(enabledV3)
+    await loadV3Plugins(enabledV3, true)
 }
 
 const isAndroidFirefoxForV3Guard = typeof navigator !== 'undefined'
@@ -560,6 +560,11 @@ const isAndroidFirefoxForV3Guard = typeof navigator !== 'undefined'
     && /Android/i.test(navigator.userAgent)
 
 let v3BackgroundGuard: ReturnType<typeof createV3BackgroundGuard> | null = null
+
+export async function acquireV3RuntimeWork() {
+    if (!v3BackgroundGuard) return () => {}
+    return await v3BackgroundGuard.acquireWork()
+}
 
 function installV3BackgroundMemoryGuard() {
     if (!isAndroidFirefoxForV3Guard || typeof document === 'undefined' || v3BackgroundGuard) return

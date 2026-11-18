@@ -34,8 +34,9 @@ export function createV3BackgroundGuard(
     let suspended = false
     let disposed = false
     let transition: Promise<void> = Promise.resolve()
+    let workLeaseCount = 0
 
-    const hasActiveWork = () => deps.isGenerating() || deps.hasLiveRequests()
+    const hasActiveWork = () => workLeaseCount > 0 || deps.isGenerating() || deps.hasLiveRequests()
 
     const canSuspendNow = () => (
         deps.isAndroidFirefox
@@ -126,6 +127,36 @@ export function createV3BackgroundGuard(
         scheduleSuspend()
     }
 
+    const acquireWork = async () => {
+        if (disposed || !deps.isAndroidFirefox) return () => {}
+
+        workLeaseCount++
+        cancelTimer()
+        try {
+            await enqueue(async () => {
+                if (!suspended) return
+                // A normal plugin reload may already have restored instances.
+                if (deps.getInstanceCount() > 0) {
+                    suspended = false
+                    return
+                }
+                await performResume()
+            })
+        } catch (error) {
+            workLeaseCount--
+            reconcile()
+            throw error
+        }
+
+        let released = false
+        return () => {
+            if (released) return
+            released = true
+            workLeaseCount = Math.max(0, workLeaseCount - 1)
+            reconcile()
+        }
+    }
+
     const dispose = () => {
         disposed = true
         cancelTimer()
@@ -133,6 +164,7 @@ export function createV3BackgroundGuard(
 
     return {
         reconcile,
+        acquireWork,
         dispose,
         isSuspended: () => suspended,
         whenSettled: () => transition,

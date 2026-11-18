@@ -182,6 +182,46 @@ describe('V3 Android Firefox background guard', () => {
         expect(h.getInstances()).toBe(13)
     })
 
+    test('work lease restores a suspended runtime and blocks resuspend until release', async () => {
+        const h = harness()
+        h.setVisibility('hidden')
+        h.guard.reconcile()
+        await h.fireTimers()
+        expect(h.guard.isSuspended()).toBe(true)
+        expect(h.getInstances()).toBe(0)
+
+        const release = await h.guard.acquireWork()
+        expect(h.guard.isSuspended()).toBe(false)
+        expect(h.getInstances()).toBe(13)
+        h.guard.reconcile()
+        expect(h.timers.size).toBe(0)
+
+        release()
+        expect(h.timers.size).toBe(1)
+    })
+
+    test('work lease arriving during suspension waits through restore', async () => {
+        const h = harness()
+        h.blockSuspend()
+        h.setVisibility('hidden')
+        h.guard.reconcile()
+
+        const pending = [...h.timers.values()]
+        h.timers.clear()
+        pending[0].callback()
+        await Promise.resolve()
+
+        const leasePromise = h.guard.acquireWork()
+        h.releaseSuspend()
+        const release = await leasePromise
+
+        expect(h.guard.isSuspended()).toBe(false)
+        expect(h.getInstances()).toBe(13)
+        expect(h.events).toEqual(['suspended:13', 'resumed:13'])
+        release()
+        expect(h.timers.size).toBe(1)
+    })
+
     test('external plugin reload while hidden converges back to suspension', async () => {
         const h = harness()
         h.setVisibility('hidden')

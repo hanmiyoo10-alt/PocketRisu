@@ -3,7 +3,7 @@ import { language } from "../../../lang";
 import { globalFetch, fetchNative } from "../../globalApi.svelte";
 import { getModelInfo, LLMFlags, LLMFormat, type LLMModel } from "../../model/modellist";
 import { risuChatParser, risuEscape, risuUnescape } from "../../parser/parser.svelte";
-import { pluginProcess, pluginV2 } from "../../plugins/plugins.svelte";
+import { acquireV3RuntimeWork, pluginProcess, pluginV2 } from "../../plugins/plugins.svelte";
 import { getCurrentCharacter, getCurrentChat, getDatabase, type character, type MessageGenerationInfo } from "../../storage/database.svelte";
 import { tokenizeNum, encodeWithTokenizer } from "../../tokenizer";
 import { v4 as uuidv4 } from "uuid";
@@ -141,6 +141,19 @@ export type requestDataResponse = {
 export interface StreamResponseChunk{[key:string]:string}
 
 export async function requestChatData(arg:requestDataArgument, model:ModelModeExtended, abortSignal:AbortSignal=null):Promise<requestDataResponse> {
+    let releaseV3Runtime: () => void
+    try {
+        releaseV3Runtime = await acquireV3RuntimeWork()
+    } catch (error) {
+        console.error('[V3MemoryGuard] failed to restore plugin runtime before request:', error)
+        return {
+            type: 'fail',
+            noRetry: true,
+            result: 'Plugin runtime failed to restore',
+        }
+    }
+
+    try {
     const db = getDatabase()
     const fallBackModels:string[] = safeStructuredClone(db?.fallbackModels?.[model] ?? [])
     const tools = arg.tools ?? (await getTools())
@@ -302,6 +315,9 @@ export async function requestChatData(arg:requestDataArgument, model:ModelModeEx
     return da ?? {
         type: 'fail',
         result: "All models failed"
+    }
+    } finally {
+        releaseV3Runtime()
     }
 }
 

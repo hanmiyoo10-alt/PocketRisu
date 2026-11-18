@@ -6,7 +6,7 @@ import { alertInput, notifySuccess, notifyError } from "src/ts/alert";
 import { v4 } from "uuid";
 import type { MCPClientLike } from "./internalmcp";
 import { sleep } from "src/ts/util";
-import { registeredCustomPluginMCPs } from "./pluginmcp";
+import { syncRegisteredCustomPluginMCP } from "./pluginmcp";
 import { makeEncodedStorageKey, readPersistentJson, writePersistentJson } from "src/ts/storage/persistentKv";
 
 export type MCPToolWithURL = MCPTool & {
@@ -26,6 +26,14 @@ export async function initializeMCPs(additionalMCPs?:string[]) {
         }
     }
     for(const mcp of mcpUrls) {
+        if(mcp.startsWith('plugin:')){
+            const customMCP = syncRegisteredCustomPluginMCP(MCPs, mcp);
+            if(customMCP){
+                await customMCP.checkHandshake();
+            }
+            continue;
+        }
+
         if(!MCPs[mcp]) {
 
             let mcpUrl = mcp;
@@ -68,14 +76,6 @@ export async function initializeMCPs(additionalMCPs?:string[]) {
                 continue;
             }
 
-            if(mcp.startsWith('plugin:')){
-                const customMCP = registeredCustomPluginMCPs.get(mcp);
-                if(customMCP){
-                    MCPs[mcp] = customMCP;
-                    await MCPs[mcp].checkHandshake();
-                    continue;
-                }
-            }
             if(mcp.startsWith('stdio:')){
                 const MCPJSON = mcp.slice('stdio:'.length);
                 try {

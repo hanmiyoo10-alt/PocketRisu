@@ -54,3 +54,38 @@ describe('SandboxHost.terminate', () => {
         expect(unhandled).toEqual([])
     })
 })
+
+
+describe('SandboxHost plugin readiness', () => {
+    test('waits until the iframe reports PLUGIN_READY', async () => {
+        const host = new SandboxHost({})
+        const iframe = document.createElement('iframe')
+        document.body.appendChild(iframe)
+        host.run(iframe, '')
+
+        let settled = false
+        const ready = host.waitUntilReady().then(() => { settled = true })
+        await Promise.resolve()
+        expect(settled).toBe(false)
+
+        window.dispatchEvent(new MessageEvent('message', {
+            source: iframe.contentWindow,
+            data: { type: 'PLUGIN_READY' },
+        }))
+        await ready
+        expect(settled).toBe(true)
+        host.terminate()
+    })
+
+    test('rejects readiness when the sandbox terminates first', async () => {
+        const host = new SandboxHost({})
+        const iframe = document.createElement('iframe')
+        document.body.appendChild(iframe)
+        host.run(iframe, '')
+        const ready = host.waitUntilReady()
+
+        host.terminate()
+
+        await expect(ready).rejects.toThrow('Sandbox terminated before plugin initialization completed')
+    })
+})

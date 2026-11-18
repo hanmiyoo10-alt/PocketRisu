@@ -1335,7 +1335,13 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             addPluginUnloadCallback(plugin.name, () => removePluginChatPanels(plugin.name));
             return {id};
         },
-        registerMCP: registerMCPModule,
+        registerMCP: async (...args: Parameters<typeof registerMCPModule>) => {
+            await registerMCPModule(...args);
+            const identifier = args[0]?.identifier;
+            if (identifier) {
+                addPluginUnloadCallback(plugin.name, () => unregisterMCPModule(identifier));
+            }
+        },
         unregisterMCP: unregisterMCPModule,
         unregisterUIPart: (id: string) => {
             const removeFromMenuStore = (menuStore: MenuDef[]) => {
@@ -1630,7 +1636,7 @@ export function getV3PluginInstanceCount() {
 // Plugins already told (once per session) why pluginCustomStorage is empty.
 const fullStorageHintShown = new Set<string>()
 
-export async function loadV3Plugins(plugins:RisuPlugin[]){
+export async function loadV3Plugins(plugins:RisuPlugin[], waitForReady = false){
     await Promise.all([...v3PluginInstances].map(async (instance) => {
         await unloadV3Plugin(instance.name);
     }));
@@ -1640,7 +1646,7 @@ export async function loadV3Plugins(plugins:RisuPlugin[]){
     }
     pluginEventListeners.length = 0;
 
-    const loadPromises = plugins.map(plugin => executePluginV3(plugin));
+    const loadPromises = plugins.map(plugin => executePluginV3(plugin, waitForReady));
     await Promise.all(loadPromises);
 }
 
@@ -1649,7 +1655,7 @@ export async function reloadV3Plugin(plugin:RisuPlugin){
     await executePluginV3(plugin);
 }
 
-export async function executePluginV3(plugin:RisuPlugin){
+export async function executePluginV3(plugin:RisuPlugin, waitForReady = false){
 
     const alreadyRunning = v3PluginInstances.find(p => p.name === plugin.name);
     if(alreadyRunning){
@@ -1666,6 +1672,14 @@ export async function executePluginV3(plugin:RisuPlugin){
         host
     });
     host.run(iframe, plugin.script);
+    if (waitForReady) {
+        try {
+            await host.waitUntilReady();
+        } catch (error) {
+            await unloadV3Plugin(plugin.name);
+            throw error;
+        }
+    }
     console.log(`[RisuAI Plugin: ${plugin.name}] Loaded API V3 plugin.`);
 }
 
