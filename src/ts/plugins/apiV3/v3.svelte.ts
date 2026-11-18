@@ -1631,7 +1631,25 @@ export async function reloadV3Plugin(plugin:RisuPlugin){
     await executePluginV3(plugin);
 }
 
+let v3SandboxDiagnosticSuppressionLogged = false
+
+function isV3SandboxSuppressedForDiagnostic() {
+    try {
+        return typeof window !== 'undefined'
+            && new URLSearchParams(window.location.search).get('risuDiagNoV3') === '1'
+    } catch {
+        return false
+    }
+}
+
 export async function executePluginV3(plugin:RisuPlugin){
+    if (isV3SandboxSuppressedForDiagnostic()) {
+        if (!v3SandboxDiagnosticSuppressionLogged) {
+            v3SandboxDiagnosticSuppressionLogged = true
+            console.warn('[V3Diag] Sandbox execution suppressed for this document')
+        }
+        return
+    }
 
     const alreadyRunning = v3PluginInstances.find(p => p.name === plugin.name);
     if(alreadyRunning){
