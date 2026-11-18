@@ -105,12 +105,58 @@ describe('plugin script hydration', () => {
         expect(projected._pluginScriptHydrated).toBeUndefined()
     })
 
-    it('dehydrates a disabled local plugin immediately', () => {
-        const plugins = [{ ...full('a', 'loaded-code'), enabled: false }]
+    it('preserves a disabled locally-authored full body until it is persisted', () => {
+        const local = { ...full('a', 'new-local-code'), enabled: false }
+        const plugins = [local]
+
+        const result = dehydratePluginScriptAtIndex(plugins, 0)
+
+        expect(result).toBe(local)
+        expect(plugins[0].script).toBe('new-local-code')
+        expect(isPluginScriptStub(plugins[0])).toBe(false)
+    })
+
+    it('dehydrates a disabled body that was hydrated from server authority', async () => {
+        const plugins = [stub('a')]
+        const hydrated = await hydratePluginScriptAtIndex(
+            plugins,
+            0,
+            async () => full('a', 'server-code'),
+            async () => {},
+        )
+        expect(hydrated._pluginScriptHydrated).toBe(true)
+
+        hydrated.enabled = false
         const dehydrated = dehydratePluginScriptAtIndex(plugins, 0)
+
         expect(dehydrated.script).toBe('')
         expect(dehydrated._pluginScriptStub).toBe(true)
-        expect(plugins[0]).toBe(dehydrated)
+        expect(dehydrated._pluginScriptHydrated).toBeUndefined()
+    })
+
+    it('resolves the current plugin index by name after hydration-time reordering', async () => {
+        const plugins = [stub('a'), stub('b')]
+        let release!: () => void
+        const gate = new Promise<void>(resolve => { release = resolve })
+        const hydration = hydratePluginScriptAtIndex(
+            plugins,
+            0,
+            async () => {
+                await gate
+                return full('a', 'a-code')
+            },
+            async () => {},
+        )
+
+        plugins.reverse()
+        release()
+        await hydration
+
+        const currentIndex = plugins.findIndex(plugin => plugin?.name === 'a')
+        expect(currentIndex).toBe(1)
+        plugins[currentIndex].enabled = true
+        expect(plugins.map(plugin => plugin.name)).toEqual(['b', 'a'])
+        expect(plugins[1].script).toBe('a-code')
     })
 
     it('hydrates all stubs before export', async () => {

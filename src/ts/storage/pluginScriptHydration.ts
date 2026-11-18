@@ -84,6 +84,14 @@ export function stripPluginScriptRuntimeMarkers(plugins: any): any {
 export function dehydratePluginScriptAtIndex(plugins: any[], index: number): any | null {
     const plugin = plugins?.[index]
     if (!plugin || plugin.enabled === true) return plugin ?? null
+
+    // Only discard a body that is already represented by a server-owned stub
+    // or was hydrated from that server-owned body in this runtime. A full body
+    // authored/imported/updated locally may not have reached the server yet.
+    if (!isPluginScriptStub(plugin) && plugin._pluginScriptHydrated !== true) {
+        return plugin
+    }
+
     const stub = pluginScriptToStub(plugin)
     plugins[index] = stub
     return stub
