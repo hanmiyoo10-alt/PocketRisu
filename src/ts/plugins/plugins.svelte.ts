@@ -9,13 +9,18 @@ import { DBState, hotReloading, pluginAlertModalStore, selectedCharID } from "..
 import type { ScriptMode } from "../process/scripts";
 import { checkCodeSafety } from "./pluginSafety";
 import { SafeDocument, SafeIdbFactory, SafeLocalStorage } from "./pluginSafeClass";
-import { loadV3Plugins, reloadV3Plugin } from "./apiV3/v3.svelte";
+import { getV3PluginInstanceCount, hasActiveV3FullscreenFrame, loadV3Plugins, reloadV3Plugin } from "./apiV3/v3.svelte";
 import { pluginCodeTranspiler } from "./apiV3/transpiler";
 import * as pluginStorageStore from "./pluginStorageStore";
 import { PLUGIN_CUSTOM_STORAGE_KEY, applyPluginDbKey, installApprovedPlugins, pluginCustomStorageProxy } from "./pluginDbProxy";
 import { hydratePluginCharacterSnapshotSync, restorePluginCharacterManifest, restorePluginDbKey } from './pluginCharacterSnapshot';
 import { isPluginScriptStub, resolveIncomingPluginScriptForComparison } from '../storage/pluginScriptHydration';
 import { ensureEnabledPluginScriptsHydrated, ensurePluginScriptHydrated } from '../storage/pluginScriptRuntime';
+import { isFirefox } from '../platform';
+import { isAnyGenerating } from '../process/generationState';
+import { isTerminalPhase, requestStatuses } from '../status/requestStatus';
+import { addLog } from '../log';
+import { createV3BackgroundGuard } from './v3BackgroundGuard';
 
 export const customProviderStore = writable([] as string[])
 
@@ -532,7 +537,77 @@ export async function loadPlugins() {
         await loadV2Plugin([])
     }
     await loadV3Plugins(pluginV3)
+    v3BackgroundGuard?.reconcile()
 }
+
+function hasLiveRequestStatuses() {
+    for (const entry of get(requestStatuses).values()) {
+        if (!isTerminalPhase(entry.phase)) return true
+    }
+    return false
+}
+
+async function resumeEnabledV3Plugins() {
+    await ensureEnabledPluginScriptsHydrated()
+    const db = getDatabase()
+    const enabledV3 = safeStructuredClone(db.plugins)
+        .filter((plugin: RisuPlugin) => plugin.enabled && plugin.version === '3.0')
+    await loadV3Plugins(enabledV3, true)
+}
+
+const isAndroidFirefoxForV3Guard = typeof navigator !== 'undefined'
+    && isFirefox
+    && /Android/i.test(navigator.userAgent)
+
+let v3BackgroundGuard: ReturnType<typeof createV3BackgroundGuard> | null = null
+
+export async function acquireV3RuntimeWork() {
+    if (!v3BackgroundGuard) return () => {}
+    return await v3BackgroundGuard.acquireWork()
+}
+
+function installV3BackgroundMemoryGuard() {
+    if (!isAndroidFirefoxForV3Guard || typeof document === 'undefined' || v3BackgroundGuard) return
+
+    v3BackgroundGuard = createV3BackgroundGuard({
+        isAndroidFirefox: true,
+        getVisibility: () => document.visibilityState,
+        isGenerating: () => get(isAnyGenerating),
+        hasLiveRequests: hasLiveRequestStatuses,
+        hasFullscreenFrame: hasActiveV3FullscreenFrame,
+        getInstanceCount: getV3PluginInstanceCount,
+        suspend: async () => {
+            await loadV3Plugins([])
+        },
+        resume: resumeEnabledV3Plugins,
+        onEvent: (event, instanceCount) => {
+            addLog({
+                level: 'info',
+                source: 'memory-guard',
+                message: event === 'suspended'
+                    ? 'V3 sandboxes suspended in background'
+                    : 'V3 sandboxes resumed in foreground',
+                description: JSON.stringify({ instanceCount }),
+            })
+        },
+        onError: (error) => {
+            console.error('[V3MemoryGuard] background transition failed:', error)
+            addLog({
+                level: 'warning',
+                source: 'memory-guard',
+                message: 'V3 background sandbox transition failed',
+            })
+        },
+    })
+
+    const reconcile = () => v3BackgroundGuard?.reconcile()
+    document.addEventListener('visibilitychange', reconcile)
+    isAnyGenerating.subscribe(reconcile)
+    requestStatuses.subscribe(reconcile)
+    reconcile()
+}
+
+installV3BackgroundMemoryGuard()
 
 export type PluginV2ProviderArgument = {
     prompt_chat: OpenAIChat[]

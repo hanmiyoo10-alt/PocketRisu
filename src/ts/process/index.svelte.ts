@@ -30,7 +30,7 @@ import { resolveModelPresetContextBudget } from "./request/contextBudget"
 import { getModuleAssets, getModuleLorebooks, getModules, getModuleToggles, getModuleTriggers } from "./modules";
 import { hydrateAssetListsForCbs, serializeForCbsScan } from "../parser/assetListHydration";
 import { ensureWriterReadyForUserEdit, forageStorage, readImage, resolvePrioritizedAssetManifestNames } from "../globalApi.svelte";
-import { pluginV2 } from "../plugins/plugins.svelte";
+import { acquireV3RuntimeWork, pluginV2 } from "../plugins/plugins.svelte";
 import { abortGeneration, chatGenKey, chatProcessStage, endGeneration, isChatGenerating, onDatabaseRebased, registerAbort, setGenerationStage, startGeneration } from "./generationState";
 import { clearPendingSend, registerPendingSend } from "./request/pendingSends";
 import { ensureBotPresetHydrated } from "../storage/botPresetRuntime";
@@ -286,9 +286,22 @@ export async function sendChat(chatProcessIndex = -1,arg:{
         }
     }
 
+    let releaseV3Runtime: (() => void) | null = null
+    try {
+        releaseV3Runtime = await acquireV3RuntimeWork()
+    } catch (error) {
+        console.error('[V3MemoryGuard] failed to restore plugin runtime before generation:', error)
+        notifyError('Cannot restore plugin runtime', { source: 'plugin' })
+        return false
+    }
+
     const generationId = v4()
     if (internalAbort) registerAbort(genKey, internalAbort)
-    startGeneration(genKey, generationId)
+    try {
+        startGeneration(genKey, generationId)
+    } finally {
+        releaseV3Runtime()
+    }
     // Resumable-send tombstone (pendingSends.ts): registered BEFORE the
     // pipeline so a tab death anywhere in it (translate → memory → request)
     // leaves the marker; cleared on every conclude path. Previews never

@@ -3,6 +3,21 @@ import type { MCPTool, RPCToolCallContent } from "./mcplib";
 
 export const registeredCustomPluginMCPs: Map<string, CustomPluginMCPClient> = new Map();
 
+export function syncRegisteredCustomPluginMCP(cache: Record<string, any>, identifier: string) {
+    const registered = registeredCustomPluginMCPs.get(identifier) ?? null;
+    const cached = cache[identifier];
+
+    if (cached && cached !== registered) {
+        try { cached.destroy?.(); }
+        catch (error) { console.error(`Failed to destroy stale plugin MCP ${identifier}:`, error); }
+        delete cache[identifier];
+    }
+
+    if (!registered) return null;
+    cache[identifier] = registered;
+    return registered;
+}
+
 export class CustomPluginMCPClient extends MCPClientLike {
 
     #getToolList: () => Promise<MCPTool[]>;

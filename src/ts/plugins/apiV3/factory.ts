@@ -7,7 +7,8 @@ type MsgType =
     | 'CALLBACK_RETURN'
     | 'RESPONSE'
     | 'RELEASE_INSTANCE'
-    | 'ABORT_SIGNAL';
+    | 'ABORT_SIGNAL'
+    | 'PLUGIN_READY';
 
 interface RpcMessage {
     type: MsgType;
@@ -41,6 +42,24 @@ interface AbortSignalRef {
 const GUEST_BRIDGE_SCRIPT = `
 await (async function() {
     const pendingRequests = new Map();
+    const startupCriticalMethods = new Set([
+        'addProvider',
+        'addTTSPreprocessor',
+        'addTTSPostprocessor',
+        'addRisuScriptHandler',
+        'addRisuReplacer',
+        'addRisuChatListener',
+        'registerBodyIntercepter',
+        'registerSetting',
+        'registerButton',
+        'setChatPanel',
+        'registerMCP',
+        'addPluginChannelListener',
+        'onUnload',
+        'createMutationObserver',
+    ]);
+    let startupTrackingActive = true;
+    const startupCriticalRequests = new Set();
     const callbackRegistry = new Map();
     const callbackIdByFunction = new WeakMap();
     const proxyRefRegistry = new WeakMap();
@@ -280,10 +299,9 @@ await (async function() {
     }
 
     function sendRequest(type, payload) {
-        return new Promise((resolve, reject) => {
+        const request = new Promise((resolve, reject) => {
             const reqId = Math.random().toString(36).substring(7);
             pendingRequests.set(reqId, { resolve, reject });
-
 
             if (payload.args) {
                 payload.args = payload.args.map(serializeArg);
@@ -293,6 +311,19 @@ await (async function() {
             const transferables = collectTransferables(message);
             send(message, transferables);
         });
+
+        if (
+            startupTrackingActive
+            && type === 'CALL_ROOT'
+            && startupCriticalMethods.has(String(payload.method || ''))
+        ) {
+            startupCriticalRequests.add(request);
+            request.then(
+                () => startupCriticalRequests.delete(request),
+                () => startupCriticalRequests.delete(request),
+            );
+        }
+        return request;
     }
 
     
@@ -457,6 +488,25 @@ await (async function() {
         }
     }
 
+    Object.defineProperty(window, '__risuFinishStartupTracking', {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: async () => {
+            while (startupCriticalRequests.size > 0) {
+                await Promise.allSettled(Array.from(startupCriticalRequests));
+            }
+            // Let promise continuations and one zero-delay startup task issue
+            // their final registration RPC before declaring this generation ready.
+            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            if (startupCriticalRequests.size > 0) {
+                await Promise.allSettled(Array.from(startupCriticalRequests));
+            }
+            startupTrackingActive = false;
+        }
+    });
+
     Object.freeze(window.postMessage);
 })();
 `;
@@ -485,6 +535,10 @@ export class SandboxHost {
 
     private pendingCallbacks = new Map<string, { resolve: Function, reject: Function, call?: Promise<unknown> }>();
     private terminated = false;
+    private readyPromise: Promise<void> = Promise.resolve();
+    private readyResolve: (() => void) | null = null;
+    private readyReject: ((reason?: any) => void) | null = null;
+    private readyTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Teardown hooks for streams bridged over MessagePort. MessagePort has no
     // 'close' event in stable browsers, so without these the other side of an
@@ -493,6 +547,50 @@ export class SandboxHost {
 
     constructor(apiFactory: any) {
         this.apiFactory = apiFactory;
+    }
+
+    private armReadyWaiter() {
+        if (this.readyTimer !== null) clearTimeout(this.readyTimer);
+        this.readyPromise = new Promise<void>((resolve, reject) => {
+            this.readyResolve = resolve;
+            this.readyReject = reject;
+        });
+        // Normal startup does not wait on this promise, so mark rejection as
+        // handled while preserving the original promise for explicit resume
+        // barriers that do await it.
+        this.readyPromise.catch(() => {});
+        this.readyTimer = setTimeout(() => {
+            this.rejectReady(new Error('Sandbox plugin initialization timed out'));
+        }, 10_000);
+    }
+
+    private resolveReady(error?: string) {
+        if (!this.readyResolve) return;
+        if (this.readyTimer !== null) {
+            clearTimeout(this.readyTimer);
+            this.readyTimer = null;
+        }
+        if (error) console.error('Sandbox plugin initialization error:', error);
+        const resolve = this.readyResolve;
+        this.readyResolve = null;
+        this.readyReject = null;
+        resolve();
+    }
+
+    private rejectReady(error: Error) {
+        if (!this.readyReject) return;
+        if (this.readyTimer !== null) {
+            clearTimeout(this.readyTimer);
+            this.readyTimer = null;
+        }
+        const reject = this.readyReject;
+        this.readyResolve = null;
+        this.readyReject = null;
+        reject(error);
+    }
+
+    public waitUntilReady() {
+        return this.readyPromise;
     }
 
     public executeInIframe(code: string): Promise<any> {
@@ -843,6 +941,11 @@ export class SandboxHost {
             const data = event.data as RpcMessage;
 
 
+            if (data.type === 'PLUGIN_READY') {
+                this.resolveReady(data.error);
+                return;
+            }
+
             if (data.type === 'CALLBACK_RETURN') {
                 const req = this.pendingCallbacks.get(data.reqId!);
                 if (req) {
@@ -941,7 +1044,7 @@ export class SandboxHost {
 
         this.messageHandlerRef = messageHandler;
         window.addEventListener('message', this.messageHandlerRef);
-
+        this.armReadyWaiter();
 
         const html = `
       <!DOCTYPE html>
@@ -960,10 +1063,25 @@ export class SandboxHost {
             document.querySelector('meta#csp-meta')?.remove();
             (async () => {
                 ${GUEST_BRIDGE_SCRIPT}
-                    
-                (async () => {
-                    ${userCode}
-                })()
+
+                let initError = null;
+                try {
+                    await (async () => {
+                        ${userCode}
+                    })();
+                } catch (error) {
+                    initError = (error && error.message) || String(error || 'Plugin initialization error');
+                    console.error(error);
+                }
+
+                try {
+                    await window.__risuFinishStartupTracking();
+                } catch (error) {
+                    initError = initError || ((error && error.message) || String(error || 'Plugin registration error'));
+                    console.error(error);
+                }
+
+                window.parent.postMessage({ type: 'PLUGIN_READY', error: initError }, '*');
             })();
         </script>
       </body>
@@ -979,6 +1097,7 @@ export class SandboxHost {
 
     public terminate() {
         this.terminated = true;
+        this.rejectReady(new Error('Sandbox terminated before plugin initialization completed'));
         if (this.messageHandlerRef) {
             window.removeEventListener('message', this.messageHandlerRef);
             this.messageHandlerRef = null;

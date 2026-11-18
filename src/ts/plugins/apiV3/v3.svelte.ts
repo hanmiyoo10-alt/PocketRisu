@@ -574,12 +574,21 @@ const unloadV3Plugin = async (pluginName: string) => {
         }
     }
     if(callbacks){
-        pluginUnloadCallbacks.delete(pluginName); 
+        pluginUnloadCallbacks.delete(pluginName);
         let promises: Promise<void>[] = [];
         for(const callback of callbacks){
-            const result = callback();
-            if(result instanceof Promise){
-                promises.push(result);
+            try {
+                const result = callback();
+                if(result instanceof Promise){
+                    promises.push(result.catch((error) => {
+                        console.error(`[RisuAI Plugin: ${pluginName}] unload callback rejected:`, error);
+                    }));
+                }
+            } catch (error) {
+                // A plugin-owned unload hook must not prevent listener/iframe
+                // teardown. Background memory suspension depends on reaching
+                // host.terminate() even when one plugin cleanup is broken.
+                console.error(`[RisuAI Plugin: ${pluginName}] unload callback threw:`, error);
             }
         }
 
@@ -631,6 +640,11 @@ const pluginPermissionGate = createPluginPermissionGate({
 // plugin itself is waiting on, so it could hang forever. While an alert is
 // open the frame drops below the alert layer (z-50).
 const fullscreenPluginFrames = new Set<HTMLIFrameElement>()
+
+export function hasActiveV3FullscreenFrame() {
+    return fullscreenPluginFrames.size > 0
+}
+
 let appAlertOpen = false
 let alertLayerWatched = false
 
@@ -1321,7 +1335,13 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             addPluginUnloadCallback(plugin.name, () => removePluginChatPanels(plugin.name));
             return {id};
         },
-        registerMCP: registerMCPModule,
+        registerMCP: async (...args: Parameters<typeof registerMCPModule>) => {
+            await registerMCPModule(...args);
+            const identifier = args[0]?.identifier;
+            if (identifier) {
+                addPluginUnloadCallback(plugin.name, () => unregisterMCPModule(identifier));
+            }
+        },
         unregisterMCP: unregisterMCPModule,
         unregisterUIPart: (id: string) => {
             const removeFromMenuStore = (menuStore: MenuDef[]) => {
@@ -1609,10 +1629,14 @@ type V3PluginInstance = {
 
 const v3PluginInstances: V3PluginInstance[] = [];
 
+export function getV3PluginInstanceCount() {
+    return v3PluginInstances.length
+}
+
 // Plugins already told (once per session) why pluginCustomStorage is empty.
 const fullStorageHintShown = new Set<string>()
 
-export async function loadV3Plugins(plugins:RisuPlugin[]){
+export async function loadV3Plugins(plugins:RisuPlugin[], waitForReady = false){
     await Promise.all([...v3PluginInstances].map(async (instance) => {
         await unloadV3Plugin(instance.name);
     }));
@@ -1622,7 +1646,7 @@ export async function loadV3Plugins(plugins:RisuPlugin[]){
     }
     pluginEventListeners.length = 0;
 
-    const loadPromises = plugins.map(plugin => executePluginV3(plugin));
+    const loadPromises = plugins.map(plugin => executePluginV3(plugin, waitForReady));
     await Promise.all(loadPromises);
 }
 
@@ -1631,7 +1655,7 @@ export async function reloadV3Plugin(plugin:RisuPlugin){
     await executePluginV3(plugin);
 }
 
-export async function executePluginV3(plugin:RisuPlugin){
+export async function executePluginV3(plugin:RisuPlugin, waitForReady = false){
 
     const alreadyRunning = v3PluginInstances.find(p => p.name === plugin.name);
     if(alreadyRunning){
@@ -1648,6 +1672,14 @@ export async function executePluginV3(plugin:RisuPlugin){
         host
     });
     host.run(iframe, plugin.script);
+    if (waitForReady) {
+        try {
+            await host.waitUntilReady();
+        } catch (error) {
+            await unloadV3Plugin(plugin.name);
+            throw error;
+        }
+    }
     console.log(`[RisuAI Plugin: ${plugin.name}] Loaded API V3 plugin.`);
 }
 
