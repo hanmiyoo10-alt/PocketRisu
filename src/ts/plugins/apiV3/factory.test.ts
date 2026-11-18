@@ -24,6 +24,26 @@ afterEach(() => {
 })
 
 describe('SandboxHost.terminate', () => {
+
+    test('reports bounded diagnostic counts without payload data', () => {
+        const host = new SandboxHost({})
+        ;(host as any).iframe = { isConnected: true, remove: vi.fn() }
+        ;(host as any).instanceRegistry.set('a', { secret: 'not exposed' })
+        ;(host as any).abortControllers.set('b', new AbortController())
+        ;(host as any).callbackWrapperCache.set('c', () => {})
+        ;(host as any).pendingCallbacks.set('d', { resolve: () => {}, reject: () => {} })
+        ;(host as any).activeStreamCleanups.add(() => {})
+
+        expect(host.getDiagnosticSnapshot()).toEqual({
+            iframeConnected: true,
+            remoteInstances: 1,
+            abortControllers: 1,
+            callbackWrappers: 1,
+            pendingCallbacks: 1,
+            activeStreams: 1,
+            terminated: false,
+        })
+    })
     test('rejects a callback still waiting on the iframe', async () => {
         const { host, callback, postMessage } = hostWithCallback()
         const call = callback('x')
