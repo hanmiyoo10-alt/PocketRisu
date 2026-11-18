@@ -116,7 +116,7 @@ export function dehydratePluginScriptAtIndex(plugins: any[], index: number): any
 }
 
 async function hydratePluginByName(
-    plugins: any[],
+    getPlugins: () => any[] | null | undefined,
     pluginName: string,
     fetchPlugin: FetchPlugin,
     waitForTick: WaitForTick,
@@ -134,6 +134,9 @@ async function hydratePluginByName(
             if (typeof fullPlugin.script !== 'string') {
                 throw new Error(`Plugin script missing: ${pluginName}`)
             }
+
+            const plugins = getPlugins()
+            if (!Array.isArray(plugins)) return null
 
             const currentIndex = plugins.findIndex(plugin => plugin?.name === pluginName)
             if (currentIndex < 0) return null
@@ -174,7 +177,17 @@ export async function hydratePluginScriptAtIndex(
     const plugin = plugins?.[index]
     if (!plugin) return null
     if (!isPluginScriptStub(plugin)) return plugin
-    return hydratePluginByName(plugins, plugin.name, fetchPlugin, waitForTick)
+    return hydratePluginByName(() => plugins, plugin.name, fetchPlugin, waitForTick)
+}
+
+export async function hydratePluginScriptByName(
+    getPlugins: () => any[] | null | undefined,
+    pluginName: string,
+    fetchPlugin: FetchPlugin,
+    waitForTick: WaitForTick = tick,
+): Promise<any | null> {
+    if (!pluginName) return null
+    return hydratePluginByName(getPlugins, pluginName, fetchPlugin, waitForTick)
 }
 
 export async function hydrateAllPluginScripts(

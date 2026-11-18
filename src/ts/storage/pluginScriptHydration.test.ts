@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
     hydrateAllPluginScripts,
     hydratePluginScriptAtIndex,
+    hydratePluginScriptByName,
     dehydratePluginScriptAtIndex,
     isPluginScriptHydrationTransitionActive,
     isPluginScriptStub,
@@ -165,6 +166,31 @@ describe('plugin script hydration', () => {
         expect(plugins[1].script).toBe('a-code')
     })
 
+
+    it('hydrates the live plugin array when reordering replaces the array during fetch', async () => {
+        let plugins = [stub('a'), stub('b')]
+        let release!: () => void
+        const gate = new Promise<void>(resolve => { release = resolve })
+        const hydration = hydratePluginScriptByName(
+            () => plugins,
+            'a',
+            async () => {
+                await gate
+                return full('a', 'a-code')
+            },
+            async () => {},
+        )
+
+        plugins = [{ ...plugins[1] }, { ...plugins[0] }]
+        release()
+        const hydrated = await hydration
+
+        expect(hydrated?.name).toBe('a')
+        expect(plugins.map(plugin => plugin.name)).toEqual(['b', 'a'])
+        expect(plugins[1].script).toBe('a-code')
+        expect(plugins[1]._pluginScriptStub).toBeUndefined()
+        expect((plugins[1] as any)._pluginScriptHydrated).toBe(true)
+    })
 
     it('treats an incoming disabled stub as a reference to the installed full script', () => {
         const incoming = stub('a')

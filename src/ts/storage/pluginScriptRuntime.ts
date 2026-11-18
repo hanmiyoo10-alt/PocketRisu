@@ -1,7 +1,7 @@
 import { DBState } from '../stores.svelte'
 import {
     hydrateAllPluginScripts,
-    hydratePluginScriptAtIndex,
+    hydratePluginScriptByName,
     isPluginScriptStub,
 } from './pluginScriptHydration'
 
@@ -14,11 +14,15 @@ async function getPluginStorage() {
 export async function ensurePluginScriptHydrated(index: number): Promise<any | null> {
     const plugins = DBState.db?.plugins
     if (!Array.isArray(plugins) || index < 0 || index >= plugins.length) return null
+    const plugin = plugins[index]
+    if (!plugin) return null
+    if (!isPluginScriptStub(plugin)) return plugin
+    const pluginName = plugin.name
 
     const storage = await getPluginStorage()
-    return hydratePluginScriptAtIndex(
-        plugins,
-        index,
+    return hydratePluginScriptByName(
+        () => DBState.db?.plugins,
+        pluginName,
         (name) => storage.fetchPluginContent(name),
     )
 }
