@@ -7,6 +7,7 @@ export type V3RuntimeTelemetryInput = {
 
 export type V3RuntimeTelemetrySnapshot = {
     version: 1
+    sequence: number
     event: string
     visibility: string
     instanceCount: number
@@ -19,7 +20,12 @@ export type V3RuntimeTelemetrySnapshot = {
     activeStreams: number
 }
 
+export function v3RuntimeTelemetryLogMessage(sequence: number, event: string): string {
+    return `V3 runtime lifecycle snapshot #${sequence}: ${event}`
+}
+
 export function buildV3RuntimeTelemetrySnapshot(
+    sequence: number,
     event: string,
     visibility: string,
     instances: V3RuntimeTelemetryInput[],
@@ -29,6 +35,7 @@ export function buildV3RuntimeTelemetrySnapshot(
 
     return {
         version: 1,
+        sequence,
         event,
         visibility,
         instanceCount: instances.length,

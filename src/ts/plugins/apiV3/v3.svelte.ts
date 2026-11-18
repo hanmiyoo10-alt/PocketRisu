@@ -1,6 +1,6 @@
 import { allowedDbKeys, customProviderStore, getV2PluginAPIs, handlePluginInstallViaPlugin, pluginV2, type EditFunction, type PluginV2ProviderArgument, type PluginV2ProviderOptions, type RisuPlugin } from "../plugins.svelte";
 import { SandboxHost } from "./factory";
-import { buildV3RuntimeTelemetrySnapshot } from "./v3RuntimeTelemetry";
+import { buildV3RuntimeTelemetrySnapshot, v3RuntimeTelemetryLogMessage } from "./v3RuntimeTelemetry";
 import { addLog } from "src/ts/log";
 import { getCurrentChat, getDatabase, normalizeChat } from "src/ts/storage/database.svelte";
 import { resolveClassicModelId } from "src/ts/process/request/modelPresetBinding";
@@ -1612,10 +1612,13 @@ type V3PluginInstance = {
 
 const v3PluginInstances: V3PluginInstance[] = [];
 let v3RuntimeTelemetryInstalled = false;
+let v3RuntimeTelemetrySequence = 0;
 
 function recordV3RuntimeTelemetry(event: string) {
     if (typeof document === 'undefined') return;
+    const sequence = ++v3RuntimeTelemetrySequence;
     const snapshot = buildV3RuntimeTelemetrySnapshot(
+        sequence,
         event,
         document.visibilityState,
         v3PluginInstances.map(instance => ({
@@ -1625,7 +1628,7 @@ function recordV3RuntimeTelemetry(event: string) {
     );
     addLog({
         level: 'info',
-        message: 'V3 runtime lifecycle snapshot',
+        message: v3RuntimeTelemetryLogMessage(sequence, event),
         description: JSON.stringify(snapshot),
         source: 'v3-runtime-telemetry',
     });
