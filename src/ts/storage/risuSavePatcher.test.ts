@@ -1151,6 +1151,69 @@ describe('fast-path — per-module granularity', () => {
     })
 })
 
+describe('RisuSavePatcher — disabled plugin script lazy projection', () => {
+    const disabledStub = {
+        name: 'disabled',
+        enabled: false,
+        version: '3.0',
+        script: '',
+        _pluginScriptStub: true,
+        realArg: { x: '1' },
+    }
+
+    test('read-hydrated disabled script is not emitted as an edit', async () => {
+        const base = {
+            characters: [],
+            botPresets: [],
+            modules: [],
+            plugins: [disabledStub],
+            personaPrompt: 'base',
+        }
+        const patcher = new RisuSavePatcher()
+        await patcher.init(base)
+
+        const hydrated = {
+            ...base,
+            plugins: [{
+                ...disabledStub,
+                script: 'server-code',
+                _pluginScriptStub: undefined,
+                _pluginScriptHydrated: true,
+            }],
+            personaPrompt: 'changed',
+        }
+        delete hydrated.plugins[0]._pluginScriptStub
+
+        const { patch } = await patcher.set(hydrated, { ...emptyToSave(), root: true })
+        expect(patch.some((op: any) => op.path.startsWith('/plugins'))).toBe(false)
+        expect(patch).toContainEqual({ op: 'replace', path: '/personaPrompt', value: 'changed' })
+    })
+
+    test('new disabled full script is emitted so updates can persist', async () => {
+        const base = {
+            characters: [],
+            botPresets: [],
+            modules: [],
+            plugins: [disabledStub],
+        }
+        const patcher = new RisuSavePatcher()
+        await patcher.init(base)
+
+        const updated = {
+            ...base,
+            plugins: [{
+                ...disabledStub,
+                script: 'new-downloaded-code',
+                _pluginScriptStub: undefined,
+            }],
+        }
+        delete updated.plugins[0]._pluginScriptStub
+
+        const { patch } = await patcher.set(updated, { ...emptyToSave(), plugins: true })
+        expect(patch.some((op: any) => op.path.startsWith('/plugins'))).toBe(true)
+    })
+})
+
 // ──────────────────────────────────────────────────────────────────────────
 // pluginCustomStorage is excluded from the patch protocol: plugin values live
 // in the server kv (pluginStorageStore) and the DB field is always {} on the

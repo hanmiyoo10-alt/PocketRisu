@@ -40,6 +40,7 @@ const pluginStorage = require('./plugin-storage-store.cjs');
 const upstreamPluginStorage = require('./upstream-plugin-storage.cjs');
 const { createAssetManifestStore } = require('./assetManifestStore.cjs');
 const { createPresetLazyStore, isPresetStub } = require('./preset-lazy-store.cjs');
+const { createPluginScriptLazyStore, isPluginScriptStub } = require('./plugin-script-lazy-store.cjs');
 const {
     stripAssetManifests,
     hydrateAssetManifests,
@@ -79,6 +80,7 @@ let saveTimers = {};
 const SAVE_INTERVAL = 5000;
 let fullChatStore = null; // Map<chaId, Map<chatId, chatObject>> — lazy-initialized
 const presetLazyStore = createPresetLazyStore();
+const pluginScriptLazyStore = createPluginScriptLazyStore();
 // chaId → archivedAt of characters activated in this process whose return to
 // `characters` the client has not saved yet. Their chats live only in
 // fullChatStore until then, so initChatStore carries them over (see there).
@@ -319,6 +321,7 @@ function launchBackgroundDbPersist(fullDb, generation, source) {
                     // fullDb is exactly the state that just hit disk.
                     initChatStore(fullDb);
                     presetLazyStore.resetFromDb(fullDb);
+                    pluginScriptLazyStore.resetFromDb(fullDb);
 
                     clearPersistFailure();
 
@@ -672,9 +675,11 @@ async function flushPendingDbUnlocked() {
                 if (raw) {
                     const dbObj = normalizeJSON(await decodeRisuSave(raw));
                     presetLazyStore.resetFromDb(dbObj);
+                    pluginScriptLazyStore.resetFromDb(dbObj);
                     const fullDb = hydrateDatabaseForDisk(stripDatabaseForClient(dbObj, { reconcileManifests: true }));
                     kvSet('database/database.bin', Buffer.from(encodeRisuSaveLegacy(fullDb)));
                     presetLazyStore.resetFromDb(fullDb);
+                    pluginScriptLazyStore.resetFromDb(fullDb);
                     clearPersistFailure();
                 }
             }
@@ -778,6 +783,7 @@ async function loadDbCacheIfMissing({ createBackup = false } = {}) {
     // its entry is carried across the rebuild (carryUnlistedChatPosts).
     const dbObj = await initChatStoreFromDisk(await decodeDatabaseWithPersistentChatIds(raw, { createBackup }));
     presetLazyStore.resetFromDb(dbObj);
+    pluginScriptLazyStore.resetFromDb(dbObj);
     dbCache[DB_HEX_KEY] = normalizeJSON(stripDatabaseForClient(dbObj, { reconcileManifests: true }));
     return true;
 }
@@ -789,6 +795,7 @@ function invalidateDbCache() {
     delete dbCache[DB_HEX_KEY];
     fullChatStore = null;
     presetLazyStore.clear();
+    pluginScriptLazyStore.clear();
     pendingActivations.clear();
     unlistedChatPosts.clear();
     if (saveTimers[DB_HEX_KEY]) {
@@ -1155,7 +1162,8 @@ function stripChatsFromDb(dbObj) {
 function stripDatabaseForClient(dbObj, { reconcileManifests = false } = {}) {
     const chatStripped = stripChatsFromDb(dbObj);
     const presetStripped = presetLazyStore.stripForClient(chatStripped);
-    return stripAssetManifests(presetStripped, assetManifestStore, {
+    const pluginStripped = pluginScriptLazyStore.stripForClient(presetStripped);
+    return stripAssetManifests(pluginStripped, assetManifestStore, {
         activate: reconcileManifests ? 'reconcile' : true,
     }).db;
 }
@@ -1164,7 +1172,8 @@ function stripDatabaseForClient(dbObj, { reconcileManifests = false } = {}) {
 function hydrateDatabaseForDisk(clientDb) {
     const chatsHydrated = reassembleFullDb(clientDb);
     const presetsHydrated = presetLazyStore.hydrateForDisk(chatsHydrated);
-    return hydrateAssetManifests(presetsHydrated, assetManifestStore);
+    const pluginsHydrated = pluginScriptLazyStore.hydrateForDisk(presetsHydrated);
+    return hydrateAssetManifests(pluginsHydrated, assetManifestStore);
 }
 
 /**
@@ -1327,6 +1336,7 @@ async function ensureDbRuntimeCache() {
             fullChatStore = new Map();
         }
         presetLazyStore.clear();
+        pluginScriptLazyStore.clear();
         if (!dbCache[DB_HEX_KEY]) {
             dbCache[DB_HEX_KEY] = {};
         }
@@ -1347,8 +1357,11 @@ async function ensureDbRuntimeCache() {
 
     if (!dbCache[DB_HEX_KEY]) {
         presetLazyStore.resetFromDb(cacheDbObj);
+        pluginScriptLazyStore.resetFromDb(cacheDbObj);
         dbCache[DB_HEX_KEY] = normalizeJSON(
-            presetLazyStore.stripForClient(stripChatsFromDb(cacheDbObj))
+            pluginScriptLazyStore.stripForClient(
+                presetLazyStore.stripForClient(stripChatsFromDb(cacheDbObj))
+            )
         );
     }
 }
@@ -1532,6 +1545,7 @@ async function persistDbCacheWithChats(filePath, decodedKey) {
     if (decodedKey === 'database/database.bin') {
         initChatStore(fullDb);
         presetLazyStore.resetFromDb(fullDb);
+        pluginScriptLazyStore.resetFromDb(fullDb);
         lastDbPersistMs = Math.round(performance.now() - persistStartedAt);
     }
 }
@@ -4761,6 +4775,15 @@ app.get('/api/read', async (req, res, next) => {
                     if (!dbCache[filePath]) {
                         await queueStorageOperation(() => loadDbCacheIfMissing({ createBackup: true }));
                     }
+                    // A patch may temporarily leave a newly-updated disabled
+                    // plugin full in the warm cache so that page's patch/hash
+                    // baseline remains coherent. /api/read is a new-client
+                    // boundary: pending writes were flushed above, so the
+                    // lazy store is authoritative and the next document gets
+                    // disabled scripts as stubs again.
+                    dbCache[filePath] = normalizeJSON(
+                        pluginScriptLazyStore.stripForClient(dbCache[filePath])
+                    );
                     value = Buffer.from(encodeRisuSaveLegacy(dbCache[filePath]));
                 } catch (e) {
                     // Log the Error itself (not just e.message) so logger.*
@@ -5144,6 +5167,7 @@ app.post('/api/write', async (req, res, next) => {
                     // Re-init runtime side-stores only after the new blob reached KV.
                     initChatStore(fullDb);
                     presetLazyStore.resetFromDb(fullDb);
+                    pluginScriptLazyStore.resetFromDb(fullDb);
                     // ETag of what the next /api/read will serve: the
                     // PERSISTED DB, stripped. Not the request bytes — the
                     // split above may have emptied pluginCustomStorage, so
@@ -5499,6 +5523,13 @@ app.post('/api/patch', async (req, res, next) => {
                 }
             }
             if (decodedKey === 'database/database.bin') {
+                // Remember every full plugin body immediately, before the
+                // debounced disk persist. This closes the update->disable race:
+                // a second patch carrying only a stub can already rehydrate the
+                // newest script even if the first background encode has not run.
+                if (!pluginScriptLazyStore.rememberFullPlugins(next)) {
+                    logger.warn('[PluginLazy] Could not refresh full plugin authority from patched client view; preserving prior authority');
+                }
                 databasePatchHashCache.update(dbCache[filePath], next, patch);
             }
             dbCache[filePath] = next;
@@ -6887,6 +6918,32 @@ app.get('/api/preset-content/:presetId', async (req, res, next) => {
     }
 });
 
+// GET /api/plugin-content/:pluginName — retrieve the authoritative full plugin
+// body for a client-side disabled-plugin script stub. Plugin names are the
+// existing stable identity used by the plugin manager; duplicate/invalid names
+// disable stripping fail-closed in pluginScriptLazyStore.
+app.get('/api/plugin-content/:pluginName', async (req, res, next) => {
+    if (!await checkAuth(req, res)) { return; }
+    try {
+        await ensureDbRuntimeCache();
+        const pluginName = req.params.pluginName;
+        const cachedPlugin = dbCache[DB_HEX_KEY]?.plugins?.find(
+            candidate => candidate?.name === pluginName && !isPluginScriptStub(candidate)
+        );
+        const plugin = cachedPlugin
+            ? structuredClone(cachedPlugin)
+            : pluginScriptLazyStore.getFullPlugin(pluginName);
+        if (!plugin) {
+            return res.status(404).json({ error: 'Plugin not found' });
+        }
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(Buffer.from(encodeRisuSaveLegacy(plugin)));
+    } catch (error) {
+        next(error);
+    }
+});
+
 // GET /api/chat-content/:chaId/:chatIndex — retrieve full chat from server
 // ── Chat delta sync ─────────────────────────────────────────────────────────
 // The client may say "I already hold the first N messages, whose prefix
@@ -7049,11 +7106,13 @@ app.post('/api/chat-content/:chaId/:chatIndex', async (req, res, next) => {
                             if (raw) {
                                 const dbObj = normalizeJSON(await decodeRisuSave(raw));
                                 presetLazyStore.resetFromDb(dbObj);
+                                pluginScriptLazyStore.resetFromDb(dbObj);
                                 const fullDb = hydrateDatabaseForDisk(stripDatabaseForClient(dbObj, { reconcileManifests: true }));
                                 const encoded = Buffer.from(encodeRisuSaveLegacy(fullDb));
                                 try {
                                     kvSet('database/database.bin', encoded);
                                     presetLazyStore.resetFromDb(fullDb);
+                                    pluginScriptLazyStore.resetFromDb(fullDb);
                                 } catch (err) {
                                     if (err && typeof err === 'object') {
                                         try { err.attemptedSize = encoded.length; } catch {}

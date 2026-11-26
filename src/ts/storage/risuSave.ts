@@ -3,6 +3,7 @@ import * as fflate from "fflate";
 import { createBotPresetTemplate, getDatabase, type Database } from "./database.svelte";
 import { forageStorage } from "../globalApi.svelte";
 import { chatToStub } from "./chatStorage";
+import { projectPluginsForSave } from "./pluginScriptHydration";
 
 const packr = new Packr({
     useRecords:false
@@ -159,7 +160,7 @@ export class RisuSaveEncoder {
         });
         this.blocks['plugins'] = await this.encodeBlock({
             compression,
-            data: JSON.stringify(data.plugins),
+            data: JSON.stringify(projectPluginsForSave(data.plugins)),
             type: RisuSaveType.PLUGINS,
             name: 'plugins'
         });
@@ -294,7 +295,7 @@ export class RisuSaveEncoder {
         if(toSave.plugins){
             this.blocks['plugins'] = await this.encodeBlock({
                 compression: this.compression,
-                data: JSON.stringify(data.plugins),
+                data: JSON.stringify(projectPluginsForSave(data.plugins)),
                 type: RisuSaveType.PLUGINS,
                 name: 'plugins'
             });
@@ -1118,6 +1119,9 @@ export class RisuSavePatcher {
 
     async init(data: any) {
         this.lastSyncedDb = normalizeJSON(data);
+        if (Array.isArray(this.lastSyncedDb.plugins)) {
+            this.lastSyncedDb.plugins = normalizeJSON(projectPluginsForSave(this.lastSyncedDb.plugins));
+        }
         if (!Array.isArray(this.lastSyncedDb.characters)) {
             this.lastSyncedDb.characters = [];
         }
@@ -1259,8 +1263,13 @@ export class RisuSavePatcher {
             characters: curCharacters = [],
             botPresets: curBotPresets,
             modules: curModules,
-            ...curRoot
+            plugins: curPlugins,
+            ...curRootRest
         } = data
+        const curRoot: any = { ...curRootRest }
+        if (Object.hasOwn(data, 'plugins')) {
+            curRoot.plugins = projectPluginsForSave(curPlugins)
+        }
 
         // Per-KEY cheap pre-check over the root. While typing into a root field
         // (e.g. personaPrompt) the root changes on every save, so a whole-root

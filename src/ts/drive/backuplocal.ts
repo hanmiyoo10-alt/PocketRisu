@@ -5,6 +5,8 @@ import { encodeRisuSaveLegacy } from "../storage/risuSave";
 import { getDatabase, type Chat } from "../storage/database.svelte";
 import { fetchChatFromServer } from "../storage/chatStorage";
 import { ensureAllBotPresetsHydrated } from "../storage/botPresetRuntime";
+import { ensureAllPluginScriptsHydrated } from "../storage/pluginScriptRuntime";
+import { stripPluginScriptRuntimeMarkers } from "../storage/pluginScriptHydration";
 import * as pluginStorageStore from "../plugins/pluginStorageStore";
 import { language } from "src/lang";
 
@@ -134,6 +136,15 @@ export async function SavePartialLocalBackup(){
         alertError('Failed to load prompt presets. Backup aborted to prevent data loss.')
         return
     }
+
+    alertWait("Saving partial local backup... (Plugins)")
+    try {
+        await ensureAllPluginScriptsHydrated()
+    } catch (error) {
+        console.error('[PluginLazy] Partial backup plugin hydration failed:', error)
+        alertError('Failed to load plugins. Backup aborted to prevent data loss.')
+        return
+    }
     
     alertWait("Saving partial local backup...")
     const writer = new LocalWriter()
@@ -238,6 +249,7 @@ export async function SavePartialLocalBackup(){
     // Reassemble full chats from server for placeholders (runtime lazy load)
     alertWait(`Saving partial local backup... (Assembling chat data)`)
     const dbCopy = structuredClone({ ...db, account: undefined })
+    dbCopy.plugins = stripPluginScriptRuntimeMarkers(dbCopy.plugins)
     for (const module of dbCopy.modules ?? []) {
         if (!module?.assetManifest) continue
         module.assets = await loadAssetManifestItems(module.assetManifest) as [string, string, string][]
