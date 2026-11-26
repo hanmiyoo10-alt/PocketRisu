@@ -195,8 +195,15 @@ describe('active index with no preset behind it (#100)', () => {
     })
 
     test('changeToPreset ignores a target index with no preset', () => {
-        expect(() => changeToPreset(9, false)).not.toThrow()
+        expect(changeToPreset(9, false)).toBe(false)
         expect(DBState.db.botPresetsId).toBe(1)
+    })
+
+    test('changeToPreset rejects an unhydrated preset stub without changing the active index', () => {
+        DBState.db.botPresets[0] = { id: 'id-a', name: 'A stub', _presetStub: true }
+        expect(changeToPreset(0, false)).toBe(false)
+        expect(DBState.db.botPresetsId).toBe(1)
+        expect(getActiveBotPresetId()).toBe('id-b')
     })
 
     test('a valid index still saves into the active preset in place', () => {

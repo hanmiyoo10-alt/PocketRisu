@@ -4,6 +4,7 @@ import { LocalWriter, forageStorage, loadAssetManifestItems } from "../globalApi
 import { encodeRisuSaveLegacy } from "../storage/risuSave";
 import { getDatabase, type Chat } from "../storage/database.svelte";
 import { fetchChatFromServer } from "../storage/chatStorage";
+import { ensureAllBotPresetsHydrated } from "../storage/botPresetRuntime";
 import * as pluginStorageStore from "../plugins/pluginStorageStore";
 import { language } from "src/lang";
 
@@ -122,6 +123,15 @@ export async function SavePartialLocalBackup(){
     const secondConfirm = await alertConfirm(language.partialBackupSecondConfirm)
     
     if (!secondConfirm) {
+        return
+    }
+
+    alertWait("Saving partial local backup... (Prompt presets)")
+    try {
+        await ensureAllBotPresetsHydrated()
+    } catch (error) {
+        console.error('[PresetLazy] Partial backup preset hydration failed:', error)
+        alertError('Failed to load prompt presets. Backup aborted to prevent data loss.')
         return
     }
     
